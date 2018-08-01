@@ -46,12 +46,6 @@ declare_args() {
   }
 }
 
-# Check target_os here instead of is_ios as this file is loaded for secondary
-# toolchain (host toolchain in particular) but the argument is the same for
-# all toolchains.
-assert(!use_xcode_clang || target_os == "ios",
-       "Using Xcode's clang is only supported in iOS builds")
-
 # Extension for shared library files (including leading dot).
 if (is_mac || is_ios) {
   shlib_extension = ".dylib"
