@@ -96,9 +96,9 @@ template("mac_toolchain") {
       host_toolchain = host_toolchain
     }
 
-    # Supports building with the version of clang shipped with Xcode when
-    # targeting iOS by not respecting clang_base_path.
-    if (toolchain_args.current_os == "ios" && use_xcode_clang) {
+    # Supports building with the version of clang shipped with Xcode by not
+    # respecting clang_base_path.
+    if (use_xcode_clang) {
       prefix = ""
     } else {
       prefix = rebase_path("$clang_base_path/bin/", root_build_dir)
