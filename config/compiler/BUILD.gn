@@ -1518,8 +1518,6 @@ config("default_warnings") {
       "-Wno-unneeded-internal-declaration",
     ]
 
-    # use_xcode_clang only refers to the iOS toolchain, host binaries use
-    # chromium's clang always.
     if (!is_nacl) {
       cflags += [
         # TODO(thakis): https://crbug.com/604888
@@ -1532,7 +1530,7 @@ config("default_warnings") {
         cflags += [ "-Wno-nonportable-include-path" ]
       }
 
-      if (current_toolchain == host_toolchain || !use_xcode_clang) {
+      if (!use_xcode_clang) {
         # Flags NaCl (Clang 3.7) and Xcode 9.2 (Clang clang-900.0.39.2) do not
         # recognize.
         cflags += [
