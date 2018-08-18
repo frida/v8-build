@@ -150,6 +150,9 @@ declare_args() {
   # every toolchain can pass through the "global" value via toolchain_args().
   host_toolchain = ""
 
+  # Selects which C-runtime to use; one of: default, dynamic, static.
+  use_crt = "default"
+
   # DON'T ADD MORE FLAGS HERE. Read the comment above.
 }
 
@@ -351,9 +354,16 @@ default_compiler_configs = [
 ]
 
 if (is_win) {
+  if (use_crt == "default") {
+    default_compiler_configs += [ "//build/config/win:default_crt" ]
+  } else if (use_crt == "dynamic") {
+    default_compiler_configs += [ "//build/config/win:dynamic_crt" ]
+  } else if (use_crt == "static") {
+    default_compiler_configs += [ "//build/config/win:static_crt" ]
+  }
+
   default_compiler_configs += [
     "//build/config/win:default_cfg_compiler",
-    "//build/config/win:default_crt",
     "//build/config/win:lean_and_mean",
     "//build/config/win:nominmax",
     "//build/config/win:unicode",
