@@ -34,6 +34,19 @@ config("compiler") {
 # that is Linux-only. Please see that target for advice on what should go in
 # :runtime_library vs. :compiler.
 config("runtime_library") {
+  if (!is_clang) {
+    cflags = [
+      "-static-libgcc",
+    ]
+    cflags_cc = [
+      "-static-libstdc++",
+    ]
+    ldflags = [
+      "-static-libgcc",
+      "-static-libstdc++",
+    ]
+  }
+
   # Set here because OS_CHROMEOS cannot be autodetected in build_config.h like
   # OS_LINUX and the like.
   if (is_chromeos) {
