@@ -1091,17 +1091,6 @@ config("compiler_codegen") {
     configs += [ "//build/config/nacl:compiler_codegen" ]
   }
 
-  if (current_cpu == "arm64" && is_android) {
-    # On arm64 disable outlining for Android. See crbug.com/931297 for more
-    # information.
-    cflags += [ "-mno-outline" ]
-
-    # This can be removed once https://bugs.llvm.org/show_bug.cgi?id=40348
-    # has been resolved, and -mno-outline is obeyed by the linker during
-    # ThinLTO.
-    ldflags += [ "-Wl,-mllvm,-enable-machine-outliner=never" ]
-  }
-
   asmflags = cflags
 }
 
