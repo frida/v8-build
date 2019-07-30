@@ -75,9 +75,6 @@ config("compiler") {
   }
   cflags += [
     "--target=$abi_target",
-    "-isystem" +
-        rebase_path("$android_ndk_root/sysroot/usr/include/$abi_target",
-                    root_build_dir),
     "-D__ANDROID_API__=$compile_api_level",
   ]
   ldflags += [ "--target=$abi_target" ]
@@ -105,9 +102,7 @@ config("runtime_library") {
   # arm-linux-androideabi-4.4.3 toolchain (circa Gingerbread) will exhibit
   # strange errors. The include ordering here is important; change with
   # caution.
-  cflags_cc = [ "-isystem" +
-                rebase_path("$android_ndk_root/sources/android/support/include",
-                            root_build_dir) ]
+  cflags_cc = []
 
   defines = [
     "__GNU_SOURCE=1",  # Necessary for clone().
