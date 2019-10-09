@@ -5,6 +5,10 @@
 import("//build/config/ios/ios_sdk.gni")
 import("//build/toolchain/toolchain.gni")
 
+if (current_cpu == "arm" || current_cpu == "arm64") {
+  import("//build/config/arm.gni")
+}
+
 declare_args() {
   # Enabling this option makes clang compile to an intermediate
   # representation ("bitcode"), and not to native code. This is preferred
@@ -36,7 +40,11 @@ config("compiler") {
   } else if (current_cpu == "arm" || current_cpu == "armv7") {
     triplet_cpu = "armv7"
   } else if (current_cpu == "arm64") {
-    triplet_cpu = "arm64"
+    if (arm_version >= 83) {
+      triplet_cpu = "arm64e"
+    } else {
+      triplet_cpu = "arm64"
+    }
   } else {
     assert(false, "unsupported cpu: $current_cpu")
   }
