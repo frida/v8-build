@@ -7,6 +7,10 @@ import("//build/config/ios/ios_sdk.gni")
 import("//build/config/sysroot.gni")
 import("//build/toolchain/toolchain.gni")
 
+if (current_cpu == "arm" || current_cpu == "arm64") {
+  import("//build/config/arm.gni")
+}
+
 declare_args() {
   # Enabling this option makes clang compile to an intermediate
   # representation ("bitcode"), and not to native code. This is preferred
@@ -47,10 +51,17 @@ config("compiler") {
       "armv7",
     ]
   } else if (current_cpu == "arm64") {
-    common_ios_flags += [
-      "-arch",
-      "arm64",
-    ]
+    if (arm_version >= 83) {
+      common_ios_flags += [
+        "-arch",
+        "arm64e",
+      ]
+    } else {
+      common_ios_flags += [
+        "-arch",
+        "arm64",
+      ]
+    }
   }
 
   # This is here so that all files get recompiled after an Xcode update.
