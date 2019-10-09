@@ -8,6 +8,10 @@ import("//build/toolchain/rbe.gni")
 import("//build/toolchain/toolchain.gni")
 import("//build_overrides/build.gni")
 
+if (current_cpu == "arm" || current_cpu == "arm64") {
+  import("//build/config/arm.gni")
+}
+
 # This is included by reference in the //build/config/compiler config that
 # is applied to all targets. It is here to separate out the logic.
 config("compiler") {
@@ -22,7 +26,11 @@ config("compiler") {
   } else if (current_cpu == "arm" || current_cpu == "armv7") {
     triplet_cpu = "armv7"
   } else if (current_cpu == "arm64") {
-    triplet_cpu = "arm64"
+    if (arm_version >= 83) {
+      triplet_cpu = "arm64e"
+    } else {
+      triplet_cpu = "arm64"
+    }
   } else {
     assert(false, "unsupported cpu: $current_cpu")
   }
