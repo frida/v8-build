@@ -46,9 +46,8 @@ import java.util.zip.ZipOutputStream;
  * Java application that takes in an input jar, performs a series of bytecode transformations,
  * and generates an output jar.
  *
- * Two types of transformations are performed:
- * 1) Enabling assertions via {@link AssertionEnablerClassAdapter}
- * 2) Providing support for custom resources via {@link CustomResourcesClassAdapter}
+ * One type of transformation are performed:
+ * 1) Providing support for custom resources via {@link CustomResourcesClassAdapter}
  */
 class ByteCodeProcessor {
     private static final String CLASS_FILE_SUFFIX = ".class";
@@ -56,15 +55,12 @@ class ByteCodeProcessor {
     private static final int BUFFER_SIZE = 16384;
     private static boolean sVerbose;
     private static boolean sIsPrebuilt;
-    private static boolean sShouldAssert;
     private static boolean sShouldUseCustomResources;
     private static boolean sShouldUseThreadAnnotations;
     private static boolean sShouldCheckClassPath;
     private static ClassLoader sDirectClassPathClassLoader;
     private static ClassLoader sFullClassPathClassLoader;
     private static Set<String> sFullClassPathJarPaths;
-    private static String sGenerateClassDepsPath;
-    private static Set<String> sSplitCompatClassNames;
     private static ClassPathValidator sValidator;
 
     private static class EntryDataPair {
@@ -114,28 +110,26 @@ class ByteCodeProcessor {
         }
         ClassVisitor chain = writer;
         /* DEBUGGING:
-         To see the bytecode for a specific class:
-           if (entry.getName().contains("YourClassName")) {
-             chain = new TraceClassVisitor(chain, new PrintWriter(System.out));
-           }
          To see objectweb.asm code that will generate bytecode for a given class:
-           java -cp "third_party/ow2_asm/lib/asm-5.0.1.jar:third_party/ow2_asm/lib/"\
-               "asm-util-5.0.1.jar:out/Debug/lib.java/jar_containing_yourclass.jar" \
-               org.objectweb.asm.util.ASMifier org.package.YourClassName
+
+         java -cp
+         "third_party/android_deps/libs/org_ow2_asm_asm/asm-7.0.jar:third_party/android_deps/libs/org_ow2_asm_asm_util/asm-util-7.0.jar:out/Debug/lib.java/jar_containing_yourclass.jar"
+         org.objectweb.asm.util.ASMifier org.package.YourClassName
+
+         See this pdf for more details: https://asm.ow2.io/asm4-guide.pdf
+
+         To see the bytecode for a specific class, uncomment this code with your class name:
+
+        if (entry.getName().contains("YOUR_CLASS_NAME")) {
+          chain = new TraceClassVisitor(chain, new PrintWriter(System.out));
+        }
         */
         if (sShouldUseThreadAnnotations) {
             chain = new ThreadAssertionClassAdapter(chain);
         }
-        if (sShouldAssert) {
-            chain = new AssertionEnablerClassAdapter(chain);
-        }
         if (sShouldUseCustomResources) {
             chain = new CustomResourcesClassAdapter(
                     chain, reader.getClassName(), reader.getSuperName(), sFullClassPathClassLoader);
-        }
-        if (!sSplitCompatClassNames.isEmpty()) {
-            chain = new SplitCompatClassAdapter(
-                    chain, sSplitCompatClassNames, sFullClassPathClassLoader);
         }
         reader.accept(chain, 0);
         byte[] patchedByteCode = writer.toByteArray();
@@ -253,11 +247,9 @@ class ByteCodeProcessor {
         String outputJarPath = args[currIndex++];
         sVerbose = args[currIndex++].equals("--verbose");
         sIsPrebuilt = args[currIndex++].equals("--is-prebuilt");
-        sShouldAssert = args[currIndex++].equals("--enable-assert");
         sShouldUseCustomResources = args[currIndex++].equals("--enable-custom-resources");
         sShouldUseThreadAnnotations = args[currIndex++].equals("--enable-thread-annotations");
         sShouldCheckClassPath = args[currIndex++].equals("--enable-check-class-path");
-        sGenerateClassDepsPath = args[currIndex++];
         int sdkJarsLength = Integer.parseInt(args[currIndex++]);
         List<String> sdkJarPaths =
                 Arrays.asList(Arrays.copyOfRange(args, currIndex, currIndex + sdkJarsLength));
@@ -272,13 +264,6 @@ class ByteCodeProcessor {
         currIndex += directJarsLength;
         sDirectClassPathClassLoader = loadJars(directClassPathJarPaths);
 
-        // Load list of class names that need to be fixed.
-        int splitCompatClassNamesLength = Integer.parseInt(args[currIndex++]);
-        sSplitCompatClassNames = new HashSet<>();
-        sSplitCompatClassNames.addAll(Arrays.asList(
-                Arrays.copyOfRange(args, currIndex, currIndex + splitCompatClassNamesLength)));
-        currIndex += splitCompatClassNamesLength;
-
         // Load all jars that are on the classpath for the input jar for analyzing class hierarchy.
         sFullClassPathJarPaths = new HashSet<>();
         sFullClassPathJarPaths.clear();
@@ -286,13 +271,6 @@ class ByteCodeProcessor {
         sFullClassPathJarPaths.addAll(sdkJarPaths);
         sFullClassPathJarPaths.addAll(
                 Arrays.asList(Arrays.copyOfRange(args, currIndex, args.length)));
-
-        // Write list of references from Java class constant pools to specified output file
-        // sGenerateClassDepsPath. This is needed for keep rule generation for async DFMs.
-        if (!sGenerateClassDepsPath.isEmpty()) {
-            ConstantPoolReferenceReader.writeConstantPoolRefsToFile(
-                    sFullClassPathJarPaths, sGenerateClassDepsPath);
-        }
 
         sFullClassPathClassLoader = loadJars(sFullClassPathJarPaths);
         sFullClassPathJarPaths.removeAll(directClassPathJarPaths);

@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 from xml.etree import ElementTree
 
 import util.build_utils as build_utils
@@ -21,12 +22,6 @@ _SOURCE_ROOT = os.path.abspath(
 sys.path.insert(1, os.path.join(_SOURCE_ROOT, 'third_party'))
 from jinja2 import Template # pylint: disable=F0401
 
-
-EMPTY_ANDROID_MANIFEST_PATH = os.path.join(
-    _SOURCE_ROOT, 'build', 'android', 'AndroidManifest.xml')
-
-ANDROID_NAMESPACE = 'http://schemas.android.com/apk/res/android'
-TOOLS_NAMESPACE = 'http://schemas.android.com/tools'
 
 # A variation of these maps also exists in:
 # //base/android/java/src/org/chromium/base/LocaleUtils.java
@@ -46,12 +41,28 @@ _ANDROID_TO_CHROMIUM_LANGUAGE_MAP = {
     'no': 'nb',  # 'no' is not a real language. http://crbug.com/920960
 }
 
+_ALL_RESOURCE_TYPES = {
+    'anim', 'animator', 'array', 'attr', 'bool', 'color', 'dimen', 'drawable',
+    'font', 'fraction', 'id', 'integer', 'interpolator', 'layout', 'menu',
+    'mipmap', 'plurals', 'raw', 'string', 'style', 'styleable', 'transition',
+    'xml'
+}
 
-_xml_namespace_initialized = False
+AAPT_IGNORE_PATTERN = ':'.join([
+    '*OWNERS',  # Allow OWNERS files within res/
+    '*.py',  # PRESUBMIT.py sometimes exist.
+    '*.pyc',
+    '*~',  # Some editors create these as temp files.
+    '.*',  # Never makes sense to include dot(files/dirs).
+    '*.d.stamp',  # Ignore stamp files
+])
+
+MULTIPLE_RES_MAGIC_STRING = b'magic'
 
 
 def ToAndroidLocaleName(chromium_locale):
-  """Convert an Chromium locale name into a corresponding Android one."""
+  """Convert a Chromium locale name into a corresponding Android one."""
+  # Should be in sync with build/config/locales.gni.
   # First handle the special cases, these are needed to deal with Android
   # releases *before* 5.0/Lollipop.
   android_locale = _CHROME_TO_ANDROID_LOCALE_MAP.get(chromium_locale)
@@ -158,20 +169,124 @@ _TextSymbolEntry = collections.namedtuple('RTextEntry',
     ('java_type', 'resource_type', 'name', 'value'))
 
 
-def CreateResourceInfoFile(files_to_zip, zip_path):
-  """Given a mapping of archive paths to their source, write an info file.
+def _GenerateGlobs(pattern):
+  # This function processes the aapt ignore assets pattern into a list of globs
+  # to be used to exclude files using build_utils.MatchesGlob. It removes the
+  # '!', which is used by aapt to mean 'not chatty' so it does not output if the
+  # file is ignored (we dont output anyways, so it is not required). This
+  # function does not handle the <dir> and <file> prefixes used by aapt and are
+  # assumed not to be included in the pattern string.
+  return pattern.replace('!', '').split(':')
 
-  The info file contains lines of '{archive_path},{source_path}' for ease of
-  parsing. Assumes that there is no comma in the file names.
 
-  Args:
-    files_to_zip: Dict mapping path in the zip archive to original source.
-    zip_path: Path where the zip file ends up, this is where the info file goes.
-  """
-  info_file_path = zip_path + '.info'
-  with open(info_file_path, 'w') as info_file:
-    for archive_path, source_path in files_to_zip.iteritems():
-      info_file.write('{},{}\n'.format(archive_path, source_path))
+def ExtractResourceDirsFromFileList(resource_files,
+                                    ignore_pattern=AAPT_IGNORE_PATTERN):
+  """Return a list of resource directories from a list of resource files."""
+  # Directory list order is important, cannot use set or other data structures
+  # that change order. This is because resource files of the same name in
+  # multiple res/ directories ellide one another (the last one passed is used).
+  # Thus the order must be maintained to prevent non-deterministic and possibly
+  # flakey builds.
+  resource_dirs = []
+  globs = _GenerateGlobs(ignore_pattern)
+  for resource_path in resource_files:
+    if build_utils.MatchesGlob(os.path.basename(resource_path), globs):
+      # Ignore non-resource files like OWNERS and the like.
+      continue
+    # Resources are always 1 directory deep under res/.
+    res_dir = os.path.dirname(os.path.dirname(resource_path))
+    if res_dir not in resource_dirs:
+      resource_dirs.append(res_dir)
+  return resource_dirs
+
+
+def IterResourceFilesInDirectories(directories,
+                                   ignore_pattern=AAPT_IGNORE_PATTERN):
+  globs = _GenerateGlobs(ignore_pattern)
+  for d in directories:
+    for root, _, files in os.walk(d):
+      for f in files:
+        archive_path = f
+        parent_dir = os.path.relpath(root, d)
+        if parent_dir != '.':
+          archive_path = os.path.join(parent_dir, f)
+        path = os.path.join(root, f)
+        if build_utils.MatchesGlob(archive_path, globs):
+          continue
+        yield path, archive_path
+
+
+class ResourceInfoFile(object):
+  """Helper for building up .res.info files."""
+
+  def __init__(self):
+    # Dict of archive_path -> source_path for the current target.
+    self._entries = {}
+    # List of (old_archive_path, new_archive_path) tuples.
+    self._renames = []
+    # We don't currently support using both AddMapping and MergeInfoFile.
+    self._add_mapping_was_called = False
+
+  def AddMapping(self, archive_path, source_path):
+    """Adds a single |archive_path| -> |source_path| entry."""
+    self._add_mapping_was_called = True
+    # "values/" files do not end up in the apk except through resources.arsc.
+    if archive_path.startswith('values'):
+      return
+    source_path = os.path.normpath(source_path)
+    new_value = self._entries.setdefault(archive_path, source_path)
+    if new_value != source_path:
+      raise Exception('Duplicate AddMapping for "{}". old={} new={}'.format(
+          archive_path, new_value, source_path))
+
+  def RegisterRename(self, old_archive_path, new_archive_path):
+    """Records an archive_path rename.
+
+    |old_archive_path| does not need to currently exist in the mappings. Renames
+    are buffered and replayed only when Write() is called.
+    """
+    if not old_archive_path.startswith('values'):
+      self._renames.append((old_archive_path, new_archive_path))
+
+  def MergeInfoFile(self, info_file_path):
+    """Merges the mappings from |info_file_path| into this object.
+
+    Any existing entries are overridden.
+    """
+    assert not self._add_mapping_was_called
+    # Allows clobbering, which is used when overriding resources.
+    with open(info_file_path) as f:
+      self._entries.update(l.rstrip().split('\t') for l in f)
+
+  def _ApplyRenames(self):
+    applied_renames = set()
+    ret = self._entries
+    for rename_tup in self._renames:
+      # Duplicate entries happen for resource overrides.
+      # Use a "seen" set to ensure we still error out if multiple renames
+      # happen for the same old_archive_path with different new_archive_paths.
+      if rename_tup in applied_renames:
+        continue
+      applied_renames.add(rename_tup)
+      old_archive_path, new_archive_path = rename_tup
+      ret[new_archive_path] = ret[old_archive_path]
+      del ret[old_archive_path]
+
+    self._entries = None
+    self._renames = None
+    return ret
+
+  def Write(self, info_file_path):
+    """Applies renames and writes out the file.
+
+    No other methods may be called after this.
+    """
+    entries = self._ApplyRenames()
+    lines = []
+    for archive_path, source_path in entries.iteritems():
+      lines.append('{}\t{}\n'.format(archive_path, source_path))
+    with open(info_file_path, 'w') as info_file:
+      info_file.writelines(sorted(lines))
 
 
 def _ParseTextSymbolsFile(path, fix_package_ids=False):
@@ -225,26 +340,26 @@ def GetRTxtStringResourceNames(r_txt_path):
   })
 
 
-def GenerateStringResourcesWhitelist(module_r_txt_path, whitelist_r_txt_path):
-  """Generate a whitelist of string resource IDs.
+def GenerateStringResourcesAllowList(module_r_txt_path, allowlist_r_txt_path):
+  """Generate a allowlist of string resource IDs.
 
   Args:
     module_r_txt_path: Input base module R.txt path.
-    whitelist_r_txt_path: Input whitelist R.txt path.
+    allowlist_r_txt_path: Input allowlist R.txt path.
   Returns:
     A dictionary mapping numerical resource IDs to the corresponding
     string resource names. The ID values are taken from string resources in
-    |module_r_txt_path| that are also listed by name in |whitelist_r_txt_path|.
+    |module_r_txt_path| that are also listed by name in |allowlist_r_txt_path|.
   """
-  whitelisted_names = {
+  allowlisted_names = {
       entry.name
-      for entry in _ParseTextSymbolsFile(whitelist_r_txt_path)
+      for entry in _ParseTextSymbolsFile(allowlist_r_txt_path)
       if entry.resource_type == 'string'
   }
   return {
       int(entry.value, 0): entry.name
       for entry in _ParseTextSymbolsFile(module_r_txt_path)
-      if entry.resource_type == 'string' and entry.name in whitelisted_names
+      if entry.resource_type == 'string' and entry.name in allowlisted_names
   }
 
 
@@ -261,21 +376,21 @@ class RJavaBuildOptions:
   """
   def __init__(self):
     self.has_constant_ids = True
-    self.resources_whitelist = None
+    self.resources_allowlist = None
     self.has_on_resources_loaded = False
     self.export_const_styleable = False
 
   def ExportNoResources(self):
     """Make all resource IDs final, and don't generate a method."""
     self.has_constant_ids = True
-    self.resources_whitelist = None
+    self.resources_allowlist = None
     self.has_on_resources_loaded = False
     self.export_const_styleable = False
 
   def ExportAllResources(self):
     """Make all resource IDs non-final in the R.java file."""
     self.has_constant_ids = False
-    self.resources_whitelist = None
+    self.resources_allowlist = None
 
   def ExportSomeResources(self, r_txt_file_path):
     """Only select specific resource IDs to be non-final.
@@ -286,7 +401,7 @@ class RJavaBuildOptions:
         will be final.
     """
     self.has_constant_ids = True
-    self.resources_whitelist = _GetRTxtResourceNames(r_txt_file_path)
+    self.resources_allowlist = _GetRTxtResourceNames(r_txt_file_path)
 
   def ExportAllStyleables(self):
     """Make all styleable constants non-final, even non-resources ones.
@@ -321,21 +436,30 @@ class RJavaBuildOptions:
     elif not self.has_constant_ids:
       # Every resource is non-final
       return False
-    elif not self.resources_whitelist:
-      # No whitelist means all IDs are non-final.
+    elif not self.resources_allowlist:
+      # No allowlist means all IDs are non-final.
       return True
     else:
       # Otherwise, only those in the
-      return entry.name not in self.resources_whitelist
+      return entry.name not in self.resources_allowlist
 
 
-def CreateRJavaFiles(srcjar_dir, package, main_r_txt_file, extra_res_packages,
-                     extra_r_txt_files, rjava_build_options):
+def CreateRJavaFiles(srcjar_dir,
+                     package,
+                     main_r_txt_file,
+                     extra_res_packages,
+                     extra_r_txt_files,
+                     rjava_build_options,
+                     srcjar_out,
+                     custom_root_package_name=None,
+                     grandparent_custom_package_name=None,
+                     extra_main_r_text_files=None):
   """Create all R.java files for a set of packages and R.txt files.
 
   Args:
     srcjar_dir: The top-level output directory for the generated files.
-    package: Top-level package name.
+    package: Package name for R java source files which will inherit
+      from the root R java file.
     main_r_txt_file: The main R.txt file containing the valid values
       of _all_ resource IDs.
     extra_res_packages: A list of extra package names.
@@ -344,6 +468,15 @@ def CreateRJavaFiles(srcjar_dir, package, main_r_txt_file, extra_res_packages,
       |and replaced by the values extracted from |main_r_txt_file|.
     rjava_build_options: An RJavaBuildOptions instance that controls how
       exactly the R.java file is generated.
+    srcjar_out: Path of desired output srcjar.
+    custom_root_package_name: Custom package name for module root R.java file,
+      (eg. vr for gen.vr package).
+    grandparent_custom_package_name: Custom root package name for the root
+      R.java file to inherit from. DFM root R.java files will have "base"
+      as the grandparent_custom_package_name. The format of this package name
+      is identical to custom_root_package_name.
+      (eg. for vr grandparent_custom_package_name would be "base")
+    extra_main_r_text_files: R.txt files to be added to the root R.java file.
   Raises:
     Exception if a package name appears several times in |extra_res_packages|
   """
@@ -362,8 +495,42 @@ def CreateRJavaFiles(srcjar_dir, package, main_r_txt_file, extra_res_packages,
   # Map of (resource_type, name) -> Entry.
   # Contains the correct values for resources.
   all_resources = {}
-  for entry in _ParseTextSymbolsFile(main_r_txt_file, fix_package_ids=True):
-    all_resources[(entry.resource_type, entry.name)] = entry
+  all_resources_by_type = collections.defaultdict(list)
+
+  main_r_text_files = [main_r_txt_file]
+  if extra_main_r_text_files:
+    main_r_text_files.extend(extra_main_r_text_files)
+  for r_txt_file in main_r_text_files:
+    for entry in _ParseTextSymbolsFile(r_txt_file, fix_package_ids=True):
+      entry_key = (entry.resource_type, entry.name)
+      if entry_key in all_resources:
+        assert entry == all_resources[entry_key], (
+            'Input R.txt %s provided a duplicate resource with a different '
+            'entry value. Got %s, expected %s.' % (r_txt_file, entry,
+                                                   all_resources[entry_key]))
+      else:
+        all_resources[entry_key] = entry
+        all_resources_by_type[entry.resource_type].append(entry)
+        assert entry.resource_type in _ALL_RESOURCE_TYPES, (
+            'Unknown resource type: %s, add to _ALL_RESOURCE_TYPES!' %
+            entry.resource_type)
+
+  if custom_root_package_name:
+    # Custom package name is available, thus use it for root_r_java_package.
+    root_r_java_package = GetCustomPackagePath(custom_root_package_name)
+  else:
+    # Create a unique name using srcjar_out. Underscores are added to ensure
+    # no reserved keywords are used for directory names.
+    root_r_java_package = re.sub('[^\w\.]', '', srcjar_out.replace('/', '._'))
+
+  root_r_java_dir = os.path.join(srcjar_dir, *root_r_java_package.split('.'))
+  build_utils.MakeDirectory(root_r_java_dir)
+  root_r_java_path = os.path.join(root_r_java_dir, 'R.java')
+  root_java_file_contents = _RenderRootRJavaSource(
+      root_r_java_package, all_resources_by_type, rjava_build_options,
+      grandparent_custom_package_name)
+  with open(root_r_java_path, 'w') as f:
+    f.write(root_java_file_contents)
 
   # Map of package_name->resource_type->entry
   resources_by_package = (
@@ -400,18 +567,18 @@ def CreateRJavaFiles(srcjar_dir, package, main_r_txt_file, extra_res_packages,
         resources_by_type[entry.resource_type].append(entry)
 
   for package, resources_by_type in resources_by_package.iteritems():
-    _CreateRJavaSourceFile(srcjar_dir, package, resources_by_type,
-                           rjava_build_options)
+    _CreateRJavaSourceFile(srcjar_dir, package, root_r_java_package,
+                           resources_by_type, rjava_build_options)
 
 
-def _CreateRJavaSourceFile(srcjar_dir, package, resources_by_type,
-                           rjava_build_options):
+def _CreateRJavaSourceFile(srcjar_dir, package, root_r_java_package,
+                           resources_by_type, rjava_build_options):
   """Generates an R.java source file."""
   package_r_java_dir = os.path.join(srcjar_dir, *package.split('.'))
   build_utils.MakeDirectory(package_r_java_dir)
   package_r_java_path = os.path.join(package_r_java_dir, 'R.java')
-  java_file_contents = _RenderRJavaSource(package, resources_by_type,
-                                          rjava_build_options)
+  java_file_contents = _RenderRJavaSource(
+      package, root_r_java_package, resources_by_type, rjava_build_options)
   with open(package_r_java_path, 'w') as f:
     f.write(java_file_contents)
 
@@ -431,11 +598,47 @@ def _GetNonSystemIndex(entry):
   return len(res_ids)
 
 
-def _RenderRJavaSource(package, resources_by_type, rjava_build_options):
+def _RenderRJavaSource(package, root_r_java_package, resources_by_type,
+                       rjava_build_options):
+  """Generates the contents of a R.java file."""
+  template = Template(
+      """/* AUTO-GENERATED FILE.  DO NOT MODIFY. */
+
+package {{ package }};
+
+public final class R {
+    {% for resource_type in resource_types %}
+    public static final class {{ resource_type }} extends
+            {{ root_package }}.R.{{ resource_type }} {}
+    {% endfor %}
+    {% if has_on_resources_loaded %}
+    public static void onResourcesLoaded(int packageId) {
+        {{ root_package }}.R.onResourcesLoaded(packageId);
+    }
+    {% endif %}
+}
+""",
+      trim_blocks=True,
+      lstrip_blocks=True)
+
+  return template.render(
+      package=package,
+      resources=resources_by_type,
+      resource_types=sorted(_ALL_RESOURCE_TYPES),
+      root_package=root_r_java_package,
+      has_on_resources_loaded=rjava_build_options.has_on_resources_loaded)
+
+
+def GetCustomPackagePath(package_name):
+  return 'gen.' + package_name + '_module'
+
+
+def _RenderRootRJavaSource(package, all_resources_by_type, rjava_build_options,
+                           grandparent_custom_package_name):
   """Render an R.java source file. See _CreateRJaveSourceFile for args info."""
   final_resources_by_type = collections.defaultdict(list)
   non_final_resources_by_type = collections.defaultdict(list)
-  for res_type, resources in resources_by_type.iteritems():
+  for res_type, resources in all_resources_by_type.iteritems():
     for entry in resources:
       # Entries in stylable that are not int[] are not actually resource ids
       # but constants.
@@ -449,21 +652,27 @@ def _RenderRJavaSource(package, resources_by_type, rjava_build_options):
   create_id = ('{{ e.resource_type }}.{{ e.name }} ^= packageIdTransform;')
   create_id_arr = ('{{ e.resource_type }}.{{ e.name }}[i] ^='
                    ' packageIdTransform;')
-  for_loop_condition  = ('int i = {{ startIndex(e) }}; i < '
-                         '{{ e.resource_type }}.{{ e.name }}.length; ++i')
+  for_loop_condition = ('int i = {{ startIndex(e) }}; i < '
+                        '{{ e.resource_type }}.{{ e.name }}.length; ++i')
 
   # Here we diverge from what aapt does. Because we have so many
   # resources, the onResourcesLoaded method was exceeding the 64KB limit that
   # Java imposes. For this reason we split onResourcesLoaded into different
   # methods for each resource type.
-  template = Template("""/* AUTO-GENERATED FILE.  DO NOT MODIFY. */
+  extends_string = ''
+  dep_path = ''
+  if grandparent_custom_package_name:
+    extends_string = 'extends {{ parent_path }}.R.{{ resource_type }} '
+    dep_path = GetCustomPackagePath(grandparent_custom_package_name)
+
+  template = Template(
+      """/* AUTO-GENERATED FILE.  DO NOT MODIFY. */
 
 package {{ package }};
 
 public final class R {
-    private static boolean sResourcesDidLoad;
     {% for resource_type in resource_types %}
-    public static final class {{ resource_type }} {
+    public static class {{ resource_type }} """ + extends_string + """ {
         {% for e in final_resources[resource_type] %}
         public static final {{ e.java_type }} {{ e.name }} = {{ e.value }};
         {% endfor %}
@@ -477,8 +686,11 @@ public final class R {
     }
     {% endfor %}
     {% if has_on_resources_loaded %}
+    private static boolean sResourcesDidLoad;
     public static void onResourcesLoaded(int packageId) {
-        assert !sResourcesDidLoad;
+        if (sResourcesDidLoad) {
+            return;
+        }
         sResourcesDidLoad = true;
         int packageIdTransform = (packageId ^ 0x7f) << 24;
         {% for resource_type in resource_types %}
@@ -504,20 +716,17 @@ public final class R {
     {% endfor %}
     {% endif %}
 }
-""", trim_blocks=True, lstrip_blocks=True)
-
+""",
+      trim_blocks=True,
+      lstrip_blocks=True)
   return template.render(
       package=package,
-      resource_types=sorted(resources_by_type),
+      resource_types=sorted(_ALL_RESOURCE_TYPES),
       has_on_resources_loaded=rjava_build_options.has_on_resources_loaded,
       final_resources=final_resources_by_type,
       non_final_resources=non_final_resources_by_type,
-      startIndex=_GetNonSystemIndex)
-
-
-def ExtractPackageFromManifest(manifest_path):
-  """Extract package name from Android manifest file."""
-  return ParseAndroidManifest(manifest_path)[1].get('package')
+      startIndex=_GetNonSystemIndex,
+      parent_path=dep_path)
 
 
 def ExtractBinaryManifestValues(aapt2_path, apk_path):
@@ -551,6 +760,31 @@ def ExtractArscPackage(aapt2_path, apk_path):
   raise Exception('Failed to find arsc package name')
 
 
+def _RenameSubdirsWithPrefix(dir_path, prefix):
+  subdirs = [
+      d for d in os.listdir(dir_path)
+      if os.path.isdir(os.path.join(dir_path, d))
+  ]
+  renamed_subdirs = []
+  for d in subdirs:
+    old_path = os.path.join(dir_path, d)
+    new_path = os.path.join(dir_path, '{}_{}'.format(prefix, d))
+    renamed_subdirs.append(new_path)
+    os.rename(old_path, new_path)
+  return renamed_subdirs
+
+
+def _HasMultipleResDirs(zip_path):
+  """Checks for magic comment set by prepare_resources.py
+
+  Returns: True iff the zipfile has the magic comment that means it contains
+  multiple res/ dirs inside instead of just contents of a single res/ dir
+  (without a wrapping res/).
+  """
+  with zipfile.ZipFile(zip_path) as z:
+    return z.comment == MULTIPLE_RES_MAGIC_STRING
+
+
 def ExtractDeps(dep_zips, deps_dir):
   """Extract a list of resource dependency zip files.
 
@@ -572,7 +806,16 @@ def ExtractDeps(dep_zips, deps_dir):
     if os.path.exists(subdir):
       raise Exception('Resource zip name conflict: ' + subdirname)
     build_utils.ExtractAll(z, path=subdir)
-    dep_subdirs.append(subdir)
+    if _HasMultipleResDirs(z):
+      # basename of the directory is used to create a zip during resource
+      # compilation, include the path in the basename to help blame errors on
+      # the correct target. For example directory 0_res may be renamed
+      # chrome_android_chrome_app_java_resources_0_res pointing to the name and
+      # path of the android_resources target from whence it came.
+      subdir_subdirs = _RenameSubdirsWithPrefix(subdir, subdirname)
+      dep_subdirs.extend(subdir_subdirs)
+    else:
+      dep_subdirs.append(subdir)
   return dep_subdirs
 
 
@@ -583,12 +826,13 @@ class _ResourceBuildContext(object):
     temp_dir: Optional root build directory path. If None, a temporary
       directory will be created, and removed in Close().
   """
-  def __init__(self, temp_dir=None):
+
+  def __init__(self, temp_dir=None, keep_files=False):
     """Initialized the context."""
     # The top-level temporary directory.
     if temp_dir:
       self.temp_dir = temp_dir
-      self.remove_on_exit = False
+      self.remove_on_exit = not keep_files
     else:
       self.temp_dir = tempfile.mkdtemp()
       self.remove_on_exit = True
@@ -599,11 +843,21 @@ class _ResourceBuildContext(object):
     # A location to place aapt-generated files.
     self.gen_dir = os.path.join(self.temp_dir, 'gen')
     os.mkdir(self.gen_dir)
-    # Location of the generated R.txt file.
-    self.r_txt_path = os.path.join(self.gen_dir, 'R.txt')
     # A location to place generated R.java files.
     self.srcjar_dir = os.path.join(self.temp_dir, 'java')
     os.mkdir(self.srcjar_dir)
+    # Temporary file locacations.
+    self.r_txt_path = os.path.join(self.gen_dir, 'R.txt')
+    self.srcjar_path = os.path.join(self.temp_dir, 'R.srcjar')
+    self.info_path = os.path.join(self.temp_dir, 'size.info')
+    self.stable_ids_path = os.path.join(self.temp_dir, 'in_ids.txt')
+    self.emit_ids_path = os.path.join(self.temp_dir, 'out_ids.txt')
+    self.proguard_path = os.path.join(self.temp_dir, 'keeps.flags')
+    self.proguard_main_dex_path = os.path.join(self.temp_dir, 'maindex.flags')
+    self.arsc_path = os.path.join(self.temp_dir, 'out.ap_')
+    self.proto_path = os.path.join(self.temp_dir, 'out.proto.ap_')
+    self.optimized_arsc_path = os.path.join(self.temp_dir, 'out.opt.ap_')
+    self.optimized_proto_path = os.path.join(self.temp_dir, 'out.opt.proto.ap_')
 
   def Close(self):
     """Close the context and destroy all temporary files."""
@@ -612,13 +866,15 @@ class _ResourceBuildContext(object):
 
 
 @contextlib.contextmanager
-def BuildContext(temp_dir=None):
+def BuildContext(temp_dir=None, keep_files=False):
   """Generator for a _ResourceBuildContext instance."""
+  context = None
   try:
-    context = _ResourceBuildContext(temp_dir)
+    context = _ResourceBuildContext(temp_dir, keep_files)
     yield context
   finally:
-    context.Close()
+    if context:
+      context.Close()
 
 
 def ResourceArgsParser():
@@ -799,36 +1055,3 @@ def FilterAndroidResourceStringsXml(xml_file_path, string_predicate):
     new_xml_data = GenerateAndroidResourceStringsXml(strings_map, namespaces)
     with open(xml_file_path, 'wb') as f:
       f.write(new_xml_data)
-
-
-def _RegisterElementTreeNamespaces():
-  global _xml_namespace_initialized
-  if not _xml_namespace_initialized:
-    _xml_namespace_initialized = True
-    ElementTree.register_namespace('android', ANDROID_NAMESPACE)
-    ElementTree.register_namespace('tools', TOOLS_NAMESPACE)
-
-
-def ParseAndroidManifest(path):
-  """Parses an AndroidManifest.xml using ElementTree.
-
-  Registers required namespaces & creates application node if missing.
-
-  Returns tuple of:
-    doc: Root xml document.
-    manifest_node: the <manifest> node.
-    app_node: the <application> node.
-  """
-  _RegisterElementTreeNamespaces()
-  doc = ElementTree.parse(path)
-  # ElementTree.find does not work if the required tag is the root.
-  if doc.getroot().tag == 'manifest':
-    manifest_node = doc.getroot()
-  else:
-    manifest_node = doc.find('manifest')
-
-  app_node = doc.find('application')
-  if app_node is None:
-    app_node = ElementTree.SubElement(manifest_node, 'application')
-
-  return doc, manifest_node, app_node

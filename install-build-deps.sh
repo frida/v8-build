@@ -5,7 +5,7 @@
 # found in the LICENSE file.
 
 # Script to install everything needed to build chromium (well, ideally, anyway)
-# See https://chromium.googlesource.com/chromium/src/+/master/docs/linux_build_instructions.md
+# See https://chromium.googlesource.com/chromium/src/+/master/docs/linux/build_instructions.md
 
 usage() {
   echo "Usage: $0 [--options]"
@@ -34,13 +34,14 @@ build_apt_package_list() {
   echo "Building apt package list." >&2
   apt-cache dumpavail | \
     python -c '\
+      from __future__ import print_function; \
       import re,sys; \
       o = sys.stdin.read(); \
       p = {"i386": ":i386"}; \
       f = re.M | re.S; \
       r = re.compile(r"^Package: (.+?)$.+?^Architecture: (.+?)$", f); \
       m = ["%s%s" % (x, p.get(y, "")) for x, y in re.findall(r, o)]; \
-      print "\n".join(m)'
+      print("\n".join(m))'
 }
 
 # Checks whether a particular package is available in the repos.
@@ -101,7 +102,7 @@ fi
 
 distro_codename=$(lsb_release --codename --short)
 distro_id=$(lsb_release --id --short)
-supported_codenames="(trusty|xenial|bionic|disco)"
+supported_codenames="(trusty|xenial|bionic|disco|eoan)"
 supported_ids="(Debian)"
 if [ 0 -eq "${do_unsupported-0}" ] && [ 0 -eq "${do_quick_check-0}" ] ; then
   if [[ ! $distro_codename =~ $supported_codenames &&
@@ -111,6 +112,7 @@ if [ 0 -eq "${do_unsupported-0}" ] && [ 0 -eq "${do_quick_check-0}" ] ; then
       "\tUbuntu 16.04 LTS (xenial with EoL April 2024)\n" \
       "\tUbuntu 18.04 LTS (bionic with EoL April 2028)\n" \
       "\tUbuntu 19.04 (disco)\n" \
+      "\tUbuntu 19.10 (eoan)\n" \
       "\tDebian 8 (jessie) or later" >&2
     exit 1
   fi
@@ -155,9 +157,7 @@ dev_list="\
   devscripts
   fakeroot
   flex
-  g++
   git-core
-  git-svn
   gperf
   libappindicator3-dev
   libasound2-dev
@@ -171,11 +171,11 @@ dev_list="\
   libcurl4-gnutls-dev
   libdrm-dev
   libelf-dev
+  libevdev-dev
   libffi-dev
   libgbm-dev
   libglib2.0-dev
   libglu1-mesa-dev
-  libgnome-keyring-dev
   libgtk-3-dev
   libkrb5-dev
   libnspr4-dev
@@ -239,12 +239,14 @@ common_lib_list="\
   libcairo2
   libcap2
   libcups2
+  libdrm2
+  libevdev2
   libexpat1
   libffi6
   libfontconfig1
   libfreetype6
+  libgbm1
   libglib2.0-0
-  libgnome-keyring0
   libgtk-3-0
   libpam0g
   libpango1.0-0
@@ -296,6 +298,8 @@ backwards_compatible_list="\
   fonts-stix
   fonts-thai-tlwg
   fonts-tlwg-garuda
+  g++
+  git-svn
   language-pack-da
   language-pack-fr
   language-pack-he
@@ -401,7 +405,7 @@ case $distro_codename in
                 gcc-5-multilib-arm-linux-gnueabihf
                 gcc-arm-linux-gnueabihf"
     ;;
-  disco)
+  disco|eoan)
     arm_list+=" g++-9-multilib-arm-linux-gnueabihf
                 gcc-9-multilib-arm-linux-gnueabihf
                 gcc-arm-linux-gnueabihf"
@@ -440,6 +444,7 @@ nacl_list="\
   ${naclports_list}
 "
 
+# Some package names have changed over time
 if package_exists libssl1.1; then
   nacl_list="${nacl_list} libssl1.1:i386"
 elif package_exists libssl1.0.2; then
@@ -447,8 +452,6 @@ elif package_exists libssl1.0.2; then
 else
   nacl_list="${nacl_list} libssl1.0.0:i386"
 fi
-
-# Some package names have changed over time
 if package_exists libpng16-16; then
   lib_list="${lib_list} libpng16-16"
 else
@@ -471,7 +474,9 @@ else
   dev_list="${dev_list} libudev0"
   nacl_list="${nacl_list} libudev0:i386"
 fi
-if package_exists libbrlapi0.6; then
+if package_exists libbrlapi0.7; then
+  dev_list="${dev_list} libbrlapi0.7"
+elif package_exists libbrlapi0.6; then
   dev_list="${dev_list} libbrlapi0.6"
 else
   dev_list="${dev_list} libbrlapi0.5"
@@ -484,7 +489,9 @@ fi
 if package_exists libav-tools; then
   dev_list="${dev_list} libav-tools"
 fi
-if package_exists php7.2-cgi; then
+if package_exists php7.3-cgi; then
+  dev_list="${dev_list} php7.3-cgi libapache2-mod-php7.3"
+elif package_exists php7.2-cgi; then
   dev_list="${dev_list} php7.2-cgi libapache2-mod-php7.2"
 elif package_exists php7.1-cgi; then
   dev_list="${dev_list} php7.1-cgi libapache2-mod-php7.1"
@@ -498,6 +505,27 @@ fi
 # installing them.
 if package_exists appmenu-gtk; then
   lib_list="$lib_list appmenu-gtk"
+fi
+if package_exists libgnome-keyring0; then
+  lib_list="${lib_list} libgnome-keyring0"
+fi
+if package_exists libgnome-keyring-dev; then
+  lib_list="${lib_list} libgnome-keyring-dev"
+fi
+if package_exists libvulkan-dev; then
+  dev_list="${dev_list} libvulkan-dev"
+fi
+if package_exists libvulkan1; then
+  lib_list="${lib_list} libvulkan1"
+fi
+if package_exists libinput10; then
+  lib_list="${lib_list} libinput10"
+fi
+if package_exists libinput-dev; then
+    dev_list="${dev_list} libinput-dev"
+fi
+if package_exists snapcraft; then
+    dev_list="${dev_list} snapcraft"
 fi
 
 # Cross-toolchain strip is needed for building the sysroots.

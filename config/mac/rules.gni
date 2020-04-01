@@ -51,67 +51,13 @@ template("mac_info_plist") {
       _info_plist,
     ]
     if (defined(invoker.info_plist_target)) {
-      deps = [
-        invoker.info_plist_target,
-      ]
+      deps = [ invoker.info_plist_target ]
     }
     forward_variables_from(invoker,
                            [
                              "testonly",
                              "executable_name",
                            ])
-  }
-}
-
-# Template to compile and package Mac XIB files as bundle data.
-#
-# Arguments
-#
-#     sources:
-#         list of string, sources to comiple
-#
-#     output_path:
-#         (optional) string, the path to use for the outputs list in the
-#         bundle_data step. If unspecified, defaults to bundle_resources_dir.
-template("mac_xib_bundle_data") {
-  _target_name = target_name
-  _compile_target_name = _target_name + "_compile_ibtool"
-
-  compile_ib_files(_compile_target_name) {
-    forward_variables_from(invoker, [ "testonly" ])
-    visibility = [ ":$_target_name" ]
-    sources = invoker.sources
-    output_extension = "nib"
-    ibtool_flags = [
-      "--minimum-deployment-target",
-      mac_deployment_target,
-
-      # TODO(rsesek): Enable this once all the bots are on Xcode 7+.
-      # "--target-device",
-      # "mac",
-    ]
-  }
-
-  bundle_data(_target_name) {
-    forward_variables_from(invoker,
-                           [
-                             "testonly",
-                             "visibility",
-                           ])
-
-    public_deps = [
-      ":$_compile_target_name",
-    ]
-    sources = get_target_outputs(":$_compile_target_name")
-
-    _output_path = "{{bundle_resources_dir}}"
-    if (defined(invoker.output_path)) {
-      _output_path = invoker.output_path
-    }
-
-    outputs = [
-      "$_output_path/{{source_file_part}}",
-    ]
   }
 }
 
@@ -244,12 +190,8 @@ template("mac_framework_bundle") {
   bundle_data(_info_plist_bundle_data) {
     forward_variables_from(invoker, [ "testonly" ])
     sources = get_target_outputs(":$_info_plist_target")
-    outputs = [
-      "{{bundle_resources_dir}}/Info.plist",
-    ]
-    public_deps = [
-      ":$_info_plist_target",
-    ]
+    outputs = [ "{{bundle_resources_dir}}/Info.plist" ]
+    public_deps = [ ":$_info_plist_target" ]
   }
 
   _target_name = target_name
@@ -292,14 +234,10 @@ template("mac_framework_bundle") {
     # The TOC file never needs to be read, since its contents are the values
     # of GN variables. It is only used to trigger this rule when the values
     # change.
-    inputs = [
-      _framework_toc_file,
-    ]
+    inputs = [ _framework_toc_file ]
 
     _stamp_file = "$target_out_dir/run_${_framework_package_target}.stamp"
-    outputs = [
-      _stamp_file,
-    ]
+    outputs = [ _stamp_file ]
 
     visibility = [ ":$_framework_target" ]
 
@@ -344,32 +282,16 @@ template("mac_framework_bundle") {
   bundle_data(_shared_library_bundle_data) {
     visibility = [ ":$_framework_target" ]
     forward_variables_from(invoker, [ "testonly" ])
-    sources = [
-      "$target_out_dir/$_link_shared_library_target/$_output_name",
-    ]
-    outputs = [
-      "{{bundle_executable_dir}}/$_output_name",
-    ]
-    public_deps = [
-      ":$_link_shared_library_target",
-    ]
+    sources = [ "$target_out_dir/$_link_shared_library_target/$_output_name" ]
+    outputs = [ "{{bundle_executable_dir}}/$_output_name" ]
+    public_deps = [ ":$_link_shared_library_target" ]
   }
 
   _framework_public_config = _target_name + "_public_config"
   config(_framework_public_config) {
-    # TODO(sdefresne): should we have a framework_dirs similar to lib_dirs
-    # and include_dirs to avoid duplicate values on the command-line.
     visibility = [ ":$_framework_target" ]
-    cflags = [
-      "-F",
-      rebase_path("$root_out_dir/.", root_build_dir),
-    ]
-    ldflags = [
-      "-F",
-      rebase_path("$root_out_dir/.", root_build_dir),
-    ]
-    lib_dirs = [ root_out_dir ]
-    libs = [ _framework_name ]
+    framework_dirs = [ root_out_dir ]
+    frameworks = [ _framework_name ]
   }
 
   create_bundle(_framework_target) {
@@ -403,6 +325,13 @@ template("mac_framework_bundle") {
       ":$_shared_library_bundle_data",
     ]
 
+    if (enable_dsyms) {
+      data = [
+        "$root_out_dir/$_output_name.dSYM/Contents/Info.plist",
+        "$root_out_dir/$_output_name.dSYM/Contents/Resources/DWARF/$_output_name",
+      ]
+    }
+
     bundle_root_dir = _framework_base_dir
     bundle_contents_dir = _framework_root_dir
     bundle_resources_dir = "$bundle_contents_dir/Resources"
@@ -416,9 +345,7 @@ template("mac_framework_bundle") {
                              "testonly",
                              "visibility",
                            ])
-    public_deps = [
-      ":$_target_name",
-    ]
+    public_deps = [ ":$_target_name" ]
     if (!defined(public_configs)) {
       public_configs = []
     }
@@ -509,14 +436,10 @@ template("mac_app_bundle") {
       forward_variables_from(invoker, [ "testonly" ])
       script = "//build/config/mac/write_pkg_info.py"
       sources = get_target_outputs(":$_info_plist_target")
-      outputs = [
-        "$target_gen_dir/$_pkg_info_target",
-      ]
+      outputs = [ "$target_gen_dir/$_pkg_info_target" ]
       args = [ "--plist" ] + rebase_path(sources, root_build_dir) +
              [ "--output" ] + rebase_path(outputs, root_build_dir)
-      deps = [
-        ":$_info_plist_target",
-      ]
+      deps = [ ":$_info_plist_target" ]
     }
   }
 
@@ -544,15 +467,9 @@ template("mac_app_bundle") {
   bundle_data(_executable_bundle_data) {
     visibility = [ ":$_target_name" ]
     forward_variables_from(invoker, [ "testonly" ])
-    sources = [
-      "$target_out_dir/$_executable_target/$_output_name",
-    ]
-    outputs = [
-      "{{bundle_executable_dir}}/$_output_name",
-    ]
-    public_deps = [
-      ":$_executable_target",
-    ]
+    sources = [ "$target_out_dir/$_executable_target/$_output_name" ]
+    outputs = [ "{{bundle_executable_dir}}/$_output_name" ]
+    public_deps = [ ":$_executable_target" ]
   }
 
   _info_plist_bundle_data = _info_plist_target + "_bundle_data"
@@ -561,12 +478,8 @@ template("mac_app_bundle") {
     forward_variables_from(invoker, [ "testonly" ])
     visibility = [ ":$_target_name" ]
     sources = get_target_outputs(":$_info_plist_target")
-    outputs = [
-      "{{bundle_contents_dir}}/Info.plist",
-    ]
-    public_deps = [
-      ":$_info_plist_target",
-    ]
+    outputs = [ "{{bundle_contents_dir}}/Info.plist" ]
+    public_deps = [ ":$_info_plist_target" ]
   }
 
   if (_write_pkg_info) {
@@ -576,12 +489,8 @@ template("mac_app_bundle") {
       forward_variables_from(invoker, [ "testonly" ])
       visibility = [ ":$_target_name" ]
       sources = get_target_outputs(":$_pkg_info_target")
-      outputs = [
-        "{{bundle_contents_dir}}/PkgInfo",
-      ]
-      public_deps = [
-        ":$_pkg_info_target",
-      ]
+      outputs = [ "{{bundle_contents_dir}}/PkgInfo" ]
+      public_deps = [ ":$_pkg_info_target" ]
     }
   }
 
@@ -603,6 +512,14 @@ template("mac_app_bundle") {
     if (_write_pkg_info) {
       deps += [ ":$_pkg_info_bundle_data" ]
     }
+
+    if (enable_dsyms) {
+      data = [
+        "$root_out_dir/$_output_name.dSYM/Contents/Info.plist",
+        "$root_out_dir/$_output_name.dSYM/Contents/Resources/DWARF/$_output_name",
+      ]
+    }
+
     product_type = _product_type
     bundle_root_dir = "$root_out_dir/${_output_name}.${_output_extension}"
     bundle_contents_dir = "$bundle_root_dir/Contents"
@@ -644,15 +561,9 @@ template("mac_plugin_bundle") {
   bundle_data(_loadable_module_bundle_data) {
     forward_variables_from(invoker, [ "testonly" ])
     visibility = [ ":$_target_name" ]
-    sources = [
-      "$target_out_dir/${_output_name}.so",
-    ]
-    outputs = [
-      "{{bundle_executable_dir}}/$_output_name",
-    ]
-    public_deps = [
-      ":$_loadable_module_target",
-    ]
+    sources = [ "$target_out_dir/$_output_name.so" ]
+    outputs = [ "{{bundle_executable_dir}}/$_output_name" ]
+    public_deps = [ ":$_loadable_module_target" ]
   }
 
   create_bundle(_target_name) {
@@ -668,6 +579,13 @@ template("mac_plugin_bundle") {
       deps = []
     }
     deps += [ ":$_loadable_module_bundle_data" ]
+
+    if (enable_dsyms) {
+      data = [
+        "$root_out_dir/$_output_name.so.dSYM/Contents/Info.plist",
+        "$root_out_dir/$_output_name.so.dSYM/Contents/Resources/DWARF/$_output_name.so",
+      ]
+    }
 
     bundle_root_dir = "$root_out_dir/$_output_name.plugin"
     bundle_contents_dir = "$bundle_root_dir/Contents"

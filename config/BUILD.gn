@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/allocator.gni")
 import("//build/config/c++/c++.gni")
 import("//build/config/chrome_build.gni")
 import("//build/config/chromecast_build.gni")
@@ -21,20 +20,8 @@ import("//build/config/pch.gni")
 import("//build/config/sanitizers/sanitizers.gni")
 import("//build/config/ui.gni")
 import("//build/toolchain/goma.gni")
-declare_args() {
-  # When set (the default) enables C++ iterator debugging in debug builds.
-  # Iterator debugging is always off in release builds (technically, this flag
-  # affects the "debug" config, which is always available but applied by
-  # default only in debug builds).
-  #
-  # Iterator debugging is generally useful for catching bugs. But it can
-  # introduce extra locking to check the state of an iterator against the state
-  # of the current object. For iterator- and thread-heavy code, this can
-  # significantly slow execution - two orders of magnitude slowdown has been
-  # seen (crbug.com/903553) and iterator debugging also slows builds by making
-  # generation of snapshot_blob.bin take ~40-60 s longer. Therefore this
-  # defaults to off.
-  enable_iterator_debugging = false
+if (is_android) {
+  import("//build/config/android/abi.gni")
 }
 
 # ==============================================
@@ -91,14 +78,8 @@ config("feature_flags") {
   if (use_x11) {
     defines += [ "USE_X11=1" ]
   }
-  if (use_allocator != "tcmalloc") {
-    defines += [ "NO_TCMALLOC" ]
-  }
   if (is_asan || is_hwasan || is_lsan || is_tsan || is_msan) {
-    defines += [
-      "MEMORY_TOOL_REPLACES_ALLOCATOR",
-      "MEMORY_SANITIZER_INITIAL_SIZE",
-    ]
+    defines += [ "MEMORY_TOOL_REPLACES_ALLOCATOR" ]
   }
   if (is_asan) {
     defines += [ "ADDRESS_SANITIZER" ]
@@ -110,7 +91,6 @@ config("feature_flags") {
     defines += [
       "THREAD_SANITIZER",
       "DYNAMIC_ANNOTATIONS_EXTERNAL_IMPL=1",
-      "WTF_USE_DYNAMIC_ANNOTATIONS_NOIMPL=1",
     ]
   }
   if (is_msan) {
@@ -119,22 +99,13 @@ config("feature_flags") {
   if (is_ubsan || is_ubsan_null || is_ubsan_vptr || is_ubsan_security) {
     defines += [ "UNDEFINED_SANITIZER" ]
   }
-  if (safe_browsing_mode == 1) {
-    defines += [ "FULL_SAFE_BROWSING" ]
-    defines += [ "SAFE_BROWSING_CSD" ]
-    defines += [ "SAFE_BROWSING_DB_LOCAL" ]
-  } else if (safe_browsing_mode == 2) {
-    defines += [ "SAFE_BROWSING_DB_REMOTE" ]
-  } else if (safe_browsing_mode == 3) {
-    defines += [ "SAFE_BROWSING_DB_LOCAL" ]
-  }
   if (is_official_build) {
     defines += [ "OFFICIAL_BUILD" ]
   }
+
   if (is_chrome_branded) {
+    # TODO(thakis): Remove this in favor of build/branding_buildflags.h.
     defines += [ "GOOGLE_CHROME_BUILD" ]
-  } else {
-    defines += [ "CHROMIUM_BUILD" ]
   }
 
   # ==============================================
@@ -150,7 +121,6 @@ config("debug") {
   defines = [
     "_DEBUG",
     "DYNAMIC_ANNOTATIONS_ENABLED=1",
-    "WTF_USE_DYNAMIC_ANNOTATIONS=1",
   ]
 
   if (is_nacl) {
@@ -158,7 +128,7 @@ config("debug") {
   }
 
   if (is_win) {
-    if (!enable_iterator_debugging) {
+    if (!enable_iterator_debugging && !use_custom_libcxx) {
       # Iterator debugging is enabled by default by the compiler on debug
       # builds, and we have to tell it to turn it off.
       defines += [ "_HAS_ITERATOR_DEBUGGING=0" ]
@@ -176,10 +146,7 @@ config("release") {
 
   # Sanitizers.
   if (is_tsan) {
-    defines += [
-      "DYNAMIC_ANNOTATIONS_ENABLED=1",
-      "WTF_USE_DYNAMIC_ANNOTATIONS=1",
-    ]
+    defines += [ "DYNAMIC_ANNOTATIONS_ENABLED=1" ]
   } else {
     defines += [ "NVALGRIND" ]
     if (!is_nacl) {
@@ -303,15 +270,14 @@ group("common_deps") {
   }
 
   if (is_fuchsia) {
-    public_deps += [ "//third_party/fuchsia-sdk:runtime_library" ]
+    public_deps +=
+        [ "//third_party/fuchsia-sdk/sdk/build/config:runtime_library_group" ]
   }
 }
 
 # Only the executable template in BUILDCONFIG.gn should reference this.
 group("executable_deps") {
-  public_deps = [
-    ":common_deps",
-  ]
+  public_deps = [ ":common_deps" ]
   if (export_libcxxabi_from_executables) {
     public_deps += [ "//buildtools/third_party/libc++abi" ]
   }
@@ -319,16 +285,12 @@ group("executable_deps") {
 
 # Only the loadable_module template in BUILDCONFIG.gn should reference this.
 group("loadable_module_deps") {
-  public_deps = [
-    ":common_deps",
-  ]
+  public_deps = [ ":common_deps" ]
 }
 
 # Only the shared_library template in BUILDCONFIG.gn should reference this.
 group("shared_library_deps") {
-  public_deps = [
-    ":common_deps",
-  ]
+  public_deps = [ ":common_deps" ]
 }
 
 # Executable configs -----------------------------------------------------------

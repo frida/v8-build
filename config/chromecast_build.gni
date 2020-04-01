@@ -22,9 +22,9 @@ declare_args() {
   # Set this true for an audio-only Chromecast build.
   is_cast_audio_only = false
 
-  # If true, use cast CMA backend instead of default chromium media pipeline.
-  # TODO(sanfin): Remove this flag when all builds enable CMA.
-  is_cast_using_cma_backend = true
+  # If non empty, rpath of executables is set to this.
+  # If empty, default value is used.
+  target_rpath = ""
 }
 
 # Note(slan): This arg depends on the value of is_chromecast, and thus must be
@@ -41,10 +41,10 @@ declare_args() {
 }
 
 declare_args() {
-  # True to enable the cast renderer.  It is enabled by default for non-android
-  # builds.
+  # True to enable the cast renderer.  It is enabled by default for linux and
+  # android audio only builds.
   enable_cast_renderer =
-      is_chromecast && is_cast_using_cma_backend && !is_android
+      is_chromecast && (is_linux || (is_cast_audio_only && is_android))
 }
 
 # Configures media options for cast.  See media/media_options.gni
@@ -52,22 +52,32 @@ cast_mojo_media_services = []
 cast_mojo_media_host = "none"
 
 if (enable_cast_renderer) {
+  # In this path, mojo media services are hosted in two processes:
+  # 1. "renderer" and "cdm" run in browser process. This is hard coded in the
+  # code.
+  # 2. "video_decoder" runs in the process specified by "cast_mojo_media_host".
   cast_mojo_media_services = [
     "cdm",
     "renderer",
   ]
-  cast_mojo_media_host = "browser"
+
+  if (!is_cast_audio_only) {
+    cast_mojo_media_services += [ "video_decoder" ]
+  }
+
+  cast_mojo_media_host = "gpu"
 } else if (is_android) {
+  # On Android, all the enabled mojo media services run in the process specified
+  # by "cast_mojo_media_host".
   cast_mojo_media_services = [
     "cdm",
     "audio_decoder",
   ]
-  if (is_cast_audio_only) {
-    cast_mojo_media_host = "browser"
-  } else {
+  if (!is_cast_audio_only) {
     cast_mojo_media_services += [ "video_decoder" ]
-    cast_mojo_media_host = "gpu"
   }
+
+  cast_mojo_media_host = "gpu"
 }
 
 # Assert that Chromecast is being built for a supported platform.

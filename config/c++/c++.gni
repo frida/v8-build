@@ -10,7 +10,11 @@ declare_args() {
   # standard library support.
   # Don't check in changes that set this to false for more platforms; doing so
   # is not supported.
-  use_custom_libcxx = is_fuchsia || is_mac || is_ios
+  use_custom_libcxx =
+      is_fuchsia || is_android || is_mac || (is_ios && !use_xcode_clang) ||
+      (is_win && is_clang) ||
+      (is_linux &&
+       (!is_chromeos || default_toolchain != "//build/toolchain/cros:target"))
 
   # Use libc++ instead of stdlibc++ when using the host_cpu toolchain, even if
   # use_custom_libcxx is false. This is useful for cross-compiles where a custom
@@ -19,6 +23,22 @@ declare_args() {
   # expected usage is to set use_custom_libcxx=false and
   # use_custom_libcxx_for_host=true in the passed in buildargs.
   use_custom_libcxx_for_host = false
+
+  # Builds libcxx Natvis into the symbols for type visualization.
+  # Set to false to workaround http://crbug.com/966676 and
+  # http://crbug.com/966687.
+  libcxx_natvis_include = true
+
+  # When set, enables libc++ debug mode with iterator debugging.
+  #
+  # Iterator debugging is generally useful for catching bugs. But it can
+  # introduce extra locking to check the state of an iterator against the state
+  # of the current object. For iterator- and thread-heavy code, this can
+  # significantly slow execution - two orders of magnitude slowdown has been
+  # seen (crbug.com/903553) and iterator debugging also slows builds by making
+  # generation of snapshot_blob.bin take ~40-60 s longer. Therefore this
+  # defaults to off.
+  enable_iterator_debugging = false
 }
 
 use_custom_libcxx =

@@ -57,8 +57,9 @@ PY_TEMPLATE = textwrap.dedent(
     def ExpandWrappedPath(arg):
       m = _WRAPPED_PATH_RE.match(arg)
       if m:
-        return os.path.join(
+        relpath = os.path.join(
             os.path.relpath(_SCRIPT_DIR), _PATH_TO_OUTPUT_DIR, m.group(1))
+        return os.path.normpath(relpath)
       return arg
 
 
@@ -71,8 +72,10 @@ PY_TEMPLATE = textwrap.dedent(
     def main(raw_args):
       executable_path = ExpandWrappedPath('{executable_path}')
       executable_args = ExpandWrappedPaths({executable_args})
-
-      return subprocess.call([executable_path] + executable_args + raw_args)
+      cmd = [executable_path] + executable_args + raw_args
+      if executable_path.endswith('.py'):
+        cmd = [sys.executable] + cmd
+      return subprocess.call(cmd)
 
 
     if __name__ == '__main__':
@@ -99,7 +102,7 @@ def Wrap(args):
     template = SCRIPT_TEMPLATES[args.script_language]
     wrapper_script.write(template.format(
         script=py_contents))
-  os.chmod(args.wrapper_script, 0750)
+  os.chmod(args.wrapper_script, 0o750)
 
   return 0
 
@@ -119,7 +122,7 @@ def CreateArgumentParser():
   parser.add_argument(
       '--script-language',
       choices=SCRIPT_TEMPLATES.keys(),
-      help='Language in which the warpper script will be written.')
+      help='Language in which the wrapper script will be written.')
   parser.add_argument(
       'executable_args', nargs='*',
       help='Arguments to wrap into the executable.')

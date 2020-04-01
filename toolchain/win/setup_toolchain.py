@@ -28,15 +28,21 @@ def _ExtractImportantEnvironment(output_of_set):
   """Extracts environment variables required for the toolchain to run from
   a textual dump output by the cmd.exe 'set' command."""
   envvars_to_save = (
+      'cipd_cache_dir', # needed by vpython
+      'homedrive', # needed by vpython
+      'homepath', # needed by vpython
       'goma_.*', # TODO(scottmg): This is ugly, but needed for goma.
       'include',
       'lib',
       'libpath',
+      'luci_context', # needed by vpython
       'path',
       'pathext',
       'systemroot',
       'temp',
       'tmp',
+      'userprofile', # needed by vpython
+      'vpython_virtualenv_root' # needed by vpython
       )
   env = {}
   # This occasionally happens and leads to misleading SYSTEMROOT error messages
@@ -63,7 +69,7 @@ def _ExtractImportantEnvironment(output_of_set):
 
 
 def _DetectVisualStudioPath():
-  """Return path to the GYP_MSVS_VERSION of Visual Studio.
+  """Return path to the installed Visual Studio.
   """
 
   # Use the code in build/vs_toolchain.py to avoid duplicating code.
@@ -274,8 +280,9 @@ def main():
   assert vc_lib_path
   print('vc_lib_path = ' + gn_helpers.ToGNString(vc_lib_path))
   if (target_store != True):
-    # Path is assumed not to exist for desktop applications
-    assert vc_lib_atlmfc_path
+    # Path is assumed to exist for desktop applications.
+    assert vc_lib_atlmfc_path, ("Microsoft.VisualStudio.Component.VC.ATLMFC " +
+                                "is not found, check if it's installed.")
   # Possible atlmfc library path gets introduced in the future for store thus
   # output result if a result exists.
   if (vc_lib_atlmfc_path != ''):

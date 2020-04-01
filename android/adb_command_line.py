@@ -5,11 +5,13 @@
 
 """Utility for reading / writing command-line flag files on device(s)."""
 
+from __future__ import print_function
+
 import argparse
 import logging
 import sys
 
-import devil_chromium  # pylint: disable=import-error, unused-import
+import devil_chromium
 
 from devil.android import device_errors
 from devil.android import device_utils
@@ -51,7 +53,7 @@ Otherwise: Writes command-line file.
   logging_common.AddLoggingArguments(parser)
 
   args, remote_args = parser.parse_known_args()
-  script_common.InitializeEnvironment(args)
+  devil_chromium.Initialize(adb_path=args.adb_path)
   logging_common.InitializeLogging(args)
 
   devices = device_utils.DeviceUtils.HealthyDevices(device_arg=args.devices,
@@ -80,14 +82,14 @@ Otherwise: Writes command-line file.
 
   updated_values = all_devices.pMap(update_flags).pGet(None)
 
-  print '%sCurrent flags (in %s):' % (action, args.name)
+  print('%sCurrent flags (in %s):' % (action, args.name))
   for d, desc, flags in updated_values:
     if flags:
       # Shell-quote flags for easy copy/paste as new args on the terminal.
       quoted_flags = ' '.join(cmd_helper.SingleQuote(f) for f in sorted(flags))
     else:
       quoted_flags = '( empty )'
-    print '  %s (%s): %s' % (d, desc, quoted_flags)
+    print('  %s (%s): %s' % (d, desc, quoted_flags))
 
   return 0
 

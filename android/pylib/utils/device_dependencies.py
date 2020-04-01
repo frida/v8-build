@@ -8,39 +8,52 @@ import re
 from pylib import constants
 
 
-_BLACKLIST = [
-  re.compile(r'.*OWNERS'),  # Should never be included.
-  re.compile(r'.*\.crx'),  # Chrome extension zip files.
-  re.compile(r'.*\.so'),  # Libraries packed into .apk.
-  re.compile(r'.*Mojo.*manifest\.json'),  # Some source_set()s pull these in.
-  re.compile(r'.*\.py'),  # Some test_support targets include python deps.
-  re.compile(r'.*\.stamp'),  # Stamp files should never be included.
-  re.compile(r'.*\.apk'),  # Should be installed separately.
-  re.compile(r'.*lib.java/.*'),  # Never need java intermediates.
+_EXCLUSIONS = [
+    re.compile(r'.*OWNERS'),  # Should never be included.
+    re.compile(r'.*\.crx'),  # Chrome extension zip files.
+    re.compile(os.path.join('.*',
+                            r'\.git.*')),  # Any '.git*' directories/files.
+    re.compile(r'.*\.so'),  # Libraries packed into .apk.
+    re.compile(r'.*Mojo.*manifest\.json'),  # Some source_set()s pull these in.
+    re.compile(r'.*\.py'),  # Some test_support targets include python deps.
+    re.compile(r'.*\.apk'),  # Should be installed separately.
+    re.compile(r'.*lib.java/.*'),  # Never need java intermediates.
 
-  # Chrome external extensions config file.
-  re.compile(r'.*external_extensions\.json'),
+    # Test filter files:
+    re.compile(r'.*/testing/buildbot/filters/.*'),
 
-  # Exists just to test the compile, not to be run.
-  re.compile(r'.*jni_generator_tests'),
+    # Chrome external extensions config file.
+    re.compile(r'.*external_extensions\.json'),
 
-  # v8's blobs and icu data get packaged into APKs.
-  re.compile(r'.*natives_blob.*\.bin'),
-  re.compile(r'.*snapshot_blob.*\.bin'),
-  re.compile(r'.*icudtl.bin'),
+    # Exists just to test the compile, not to be run.
+    re.compile(r'.*jni_generator_tests'),
 
-  # Scripts that are needed by swarming, but not on devices:
-  re.compile(r'.*llvm-symbolizer'),
-  re.compile(r'.*md5sum_bin'),
-  re.compile(os.path.join('.*', 'development', 'scripts', 'stack')),
+    # v8's blobs and icu data get packaged into APKs.
+    re.compile(r'.*snapshot_blob.*\.bin'),
+    re.compile(r'.*icudtl.bin'),
+
+    # Scripts that are needed by swarming, but not on devices:
+    re.compile(r'.*llvm-symbolizer'),
+    re.compile(r'.*md5sum_bin'),
+    re.compile(os.path.join('.*', 'development', 'scripts', 'stack')),
+
+    # Required for java deobfuscation on the host:
+    re.compile(r'.*build/android/stacktrace/.*'),
+    re.compile(r'.*third_party/jdk/.*'),
+    re.compile(r'.*third_party/proguard/.*'),
+
+    # Build artifacts:
+    re.compile(r'.*\.stamp'),
+    re.compile(r'.*.pak\.info'),
+    re.compile(r'.*\.incremental\.json'),
 ]
 
 
 def _FilterDataDeps(abs_host_files):
-  blacklist = _BLACKLIST + [
-      re.compile(os.path.join(constants.GetOutDirectory(), 'bin'))]
-  return [p for p in abs_host_files
-          if not any(r.match(p) for r in blacklist)]
+  exclusions = _EXCLUSIONS + [
+      re.compile(os.path.join(constants.GetOutDirectory(), 'bin'))
+  ]
+  return [p for p in abs_host_files if not any(r.match(p) for r in exclusions)]
 
 
 def DevicePathComponentsFor(host_path, output_directory):

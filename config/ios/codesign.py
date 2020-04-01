@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import argparse
+import codecs
 import datetime
 import fnmatch
 import glob
@@ -99,8 +100,8 @@ class ProvisioningProfile(object):
     return self._data.get('Entitlements', {}).get('application-identifier', '')
 
   @property
-  def team_identifier(self):
-    return self._data.get('TeamIdentifier', [''])[0]
+  def application_identifier_prefix(self):
+    return self._data.get('ApplicationIdentifierPrefix', [''])[0]
 
   @property
   def entitlements(self):
@@ -121,7 +122,7 @@ class ProvisioningProfile(object):
       with the corresponding bundle_identifier, False otherwise.
     """
     return fnmatch.fnmatch(
-        '%s.%s' % (self.team_identifier, bundle_identifier),
+        '%s.%s' % (self.application_identifier_prefix, bundle_identifier),
         self.application_identifier_pattern)
 
   def Install(self, installation_path):
@@ -265,7 +266,8 @@ def GenerateEntitlements(path, provisioning_profile, bundle_identifier):
   entitlements = Entitlements(path)
   if provisioning_profile:
     entitlements.LoadDefaults(provisioning_profile.entitlements)
-    app_identifier_prefix = provisioning_profile.team_identifier + '.'
+    app_identifier_prefix = \
+      provisioning_profile.application_identifier_prefix + '.'
   else:
     app_identifier_prefix = '*.'
   entitlements.ExpandVariables({
@@ -510,9 +512,11 @@ class GenerateEntitlementsAction(Action):
 
 
 def Main():
+  # Cache this codec so that plistlib can find it. See
+  # https://crbug.com/999461#c12 for more details.
+  codecs.lookup('utf-8')
+
   parser = argparse.ArgumentParser('codesign iOS bundles')
-  parser.add_argument('--developer_dir', required=False,
-                      help='Path to Xcode.')
   subparsers = parser.add_subparsers()
 
   actions = [
@@ -525,8 +529,6 @@ def Main():
     action.Register(subparsers)
 
   args = parser.parse_args()
-  if args.developer_dir:
-    os.environ['DEVELOPER_DIR'] = args.developer_dir
   args.func(args)
 
 
