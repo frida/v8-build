@@ -758,9 +758,9 @@ config("compiler_cpu_abi") {
       ldflags += [ "-m32" ]
       if (!is_nacl) {
         cflags += [
-          "-msse2",
+          "-march=pentium4",
           "-mfpmath=sse",
-          "-mmmx",
+          "-mstackrealign",
         ]
       }
     } else if (current_cpu == "arm") {
