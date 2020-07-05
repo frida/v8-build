@@ -7,6 +7,10 @@ import("//build/config/mac/mac_sdk.gni")
 import("//build/config/mac/symbols.gni")
 import("//build/config/sysroot.gni")
 
+if (current_cpu == "arm64") {
+  import("//build/config/arm.gni")
+}
+
 # This is included by reference in the //build/config/compiler config that
 # is applied to all targets. It is here to separate out the logic.
 config("compiler") {
@@ -14,7 +18,19 @@ config("compiler") {
   common_mac_flags = []
 
   # CPU architecture.
-  if (current_cpu == "x64") {
+  if (current_cpu == "arm64") {
+    if (arm_version >= 83) {
+      common_mac_flags += [
+        "-arch",
+        "arm64e",
+      ]
+    } else {
+      common_mac_flags += [
+        "-arch",
+        "arm64",
+      ]
+    }
+  } else if (current_cpu == "x64") {
     common_mac_flags += [
       "-arch",
       "x86_64",
