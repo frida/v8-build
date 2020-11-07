@@ -2,6 +2,7 @@
   "sandbox": {
     "features": [
       "config-data",
+      "isolated-cache-storage",
       "isolated-persistent-storage",
       "isolated-temp",
       "root-ssl-certificates",
@@ -13,6 +14,7 @@
     ],
     "services": [
       "fuchsia.accessibility.semantics.SemanticsManager",
+      "fuchsia.camera3.DeviceWatcher",
       "fuchsia.device.NameProvider",
       "fuchsia.fonts.Provider",
       "fuchsia.intl.PropertyProvider",

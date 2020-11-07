@@ -2,6 +2,7 @@
   "sandbox": {
     "features": [
       "deprecated-ambient-replace-as-executable",
+      "isolated-cache-storage",
       "isolated-persistent-storage",
       "isolated-temp",
       "root-ssl-certificates",
@@ -13,6 +14,7 @@
     ],
     "services": [
       "fuchsia.accessibility.semantics.SemanticsManager",
+      "fuchsia.camera3.DeviceWatcher",
       "fuchsia.device.NameProvider",
       "fuchsia.fonts.Provider",
       "fuchsia.intl.PropertyProvider",
@@ -33,6 +35,9 @@
       "fuchsia.sysmem.Allocator",
       "fuchsia.ui.input.ImeService",
       "fuchsia.ui.input.ImeVisibilityService",
+      "fuchsia.ui.scenic.Scenic",
+      "fuchsia.ui.policy.Presenter",
+      "fuchsia.vulkan.loader.Loader",
       "fuchsia.web.ContextProvider"
     ]
   }

@@ -2,13 +2,12 @@
 # Copyright 2020 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-"""Wraps bin/helper/turbine and expands @FileArgs."""
+"""Wraps the turbine jar and expands @FileArgs."""
 
 import argparse
 import logging
 import os
 import shutil
-import subprocess
 import sys
 import time
 
@@ -42,11 +41,14 @@ def _OnStaleMd5(options, cmd, javac_cmd, files, classpath):
 
   # Use AtomicOutput so that output timestamps are not updated when outputs
   # are not changed.
-  with build_utils.AtomicOutput(options.jar_path) as f:
-    cmd += ['--output', f.name]
-    logging.info('Command: %s' % ' '.join(cmd))
+  with build_utils.AtomicOutput(options.jar_path) as output_jar, \
+      build_utils.AtomicOutput(options.generated_jar_path) as generated_jar:
+    cmd += ['--output', output_jar.name, '--gensrc_output', generated_jar.name]
+    logging.debug('Command: %s', cmd)
     start = time.time()
-    subprocess.check_call(cmd)
+    build_utils.CheckOutput(cmd,
+                            print_stdout=True,
+                            fail_on_output=options.warnings_as_errors)
     end = time.time() - start
     logging.info('Header compilation took %ss', end)
 
@@ -89,6 +91,13 @@ def main(argv):
       action='append',
       help='key=value arguments for the annotation processors.')
   parser.add_argument('--jar-path', help='Jar output path.', required=True)
+  parser.add_argument(
+      '--generated-jar-path',
+      required=True,
+      help='Output path for generated source files.')
+  parser.add_argument('--warnings-as-errors',
+                      action='store_true',
+                      help='Treat all warnings as errors.')
   options, unknown_args = parser.parse_known_args(argv)
 
   options.bootclasspath = build_utils.ParseGnList(options.bootclasspath)
@@ -103,9 +112,8 @@ def main(argv):
     if arg.startswith('@'):
       files.extend(build_utils.ReadSourcesList(arg[1:]))
 
-  cmd = [
-      build_utils.JAVA_PATH, '-classpath', options.turbine_jar_path,
-      'com.google.turbine.main.Main'
+  cmd = build_utils.JavaCmd(options.warnings_as_errors) + [
+      '-classpath', options.turbine_jar_path, 'com.google.turbine.main.Main'
   ]
   javac_cmd = []
 
@@ -150,6 +158,7 @@ def main(argv):
 
   output_paths = [
       options.jar_path,
+      options.generated_jar_path,
   ]
 
   input_strings = cmd + options.classpath + files

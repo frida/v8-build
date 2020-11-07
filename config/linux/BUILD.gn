@@ -22,19 +22,6 @@ config("compiler") {
 # that is Linux-only. Please see that target for advice on what should go in
 # :runtime_library vs. :compiler.
 config("runtime_library") {
-  if (!is_clang) {
-    cflags = [
-      "-static-libgcc",
-    ]
-    cflags_cc = [
-      "-static-libstdc++",
-    ]
-    ldflags = [
-      "-static-libgcc",
-      "-static-libstdc++",
-    ]
-  }
-
   # Set here because OS_CHROMEOS cannot be autodetected in build_config.h like
   # OS_LINUX and the like.
   if (is_chromeos) {
@@ -53,48 +40,11 @@ config("x11") {
     "X11",
     "X11-xcb",
     "xcb",
-    "xcb-dri3",
-    "Xcomposite",
-    "Xcursor",
-    "Xdamage",
-    "Xext",
-    "Xfixes",
-    "Xi",
-    "Xrender",
-    "Xtst",
   ]
-}
-
-config("xcomposite") {
-  libs = [ "Xcomposite" ]
-}
-
-config("xext") {
-  libs = [ "Xext" ]
-}
-
-config("xrandr") {
-  libs = [ "Xrandr" ]
-}
-
-config("xscrnsaver") {
-  libs = [ "Xss" ]
-}
-
-config("xfixes") {
-  libs = [ "Xfixes" ]
 }
 
 config("libcap") {
   libs = [ "cap" ]
-}
-
-config("xi") {
-  libs = [ "Xi" ]
-}
-
-config("xtst") {
-  libs = [ "Xtst" ]
 }
 
 config("libresolv") {

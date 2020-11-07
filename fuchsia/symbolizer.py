@@ -10,9 +10,19 @@ from common import SDK_ROOT
 from common import GetHostArchFromPlatform
 from common import GetHostToolPathFromPlatform
 
-# TODO(steveroe): Change 'llvm-3.8' to 'llvm' after docker image is updated.
+# TODO(crbug.com/1131647): Change 'llvm-3.8' to 'llvm' after docker image is
+# updated.
 ARM64_DOCKER_LLVM_SYMBOLIZER_PATH = os.path.join('/', 'usr', 'lib', 'llvm-3.8',
                                                  'bin', 'llvm-symbolizer')
+
+def BuildIdsPaths(package_paths):
+  """Generate build ids paths for symbolizer processes."""
+  build_ids_paths = map(
+      lambda package_path: os.path.join(
+          os.path.dirname(package_path), 'ids.txt'),
+      package_paths)
+  return build_ids_paths
+
 
 def RunSymbolizer(input_file, output_file, build_ids_files):
   """Starts a symbolizer process.
@@ -57,6 +67,12 @@ def SymbolizerFilter(input_file, build_ids_files):
     line = symbolizer_proc.stdout.readline()
     if not line:
       break
+
+    # Skip spam emitted by the symbolizer that obscures the symbolized output.
+    # TODO(https://crbug.com/1069446): Fix the symbolizer and remove this.
+    if '[[[ELF ' in line:
+      continue
+
     yield line
 
   symbolizer_proc.wait()
