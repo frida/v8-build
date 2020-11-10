@@ -77,9 +77,6 @@ config("compiler") {
   cflags += [
     # Work around crbug.com/526851, bug in VS 2015 RTM compiler.
     "/Zc:sizedDealloc-",
-
-    # Relax C++11 compliance for XP compatibility.
-    "/Zc:threadSafeInit-",
   ]
 
   if (is_clang) {

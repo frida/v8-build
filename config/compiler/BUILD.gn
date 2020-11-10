@@ -295,9 +295,7 @@ config("compiler") {
     if (fatal_linker_warnings && !is_apple && current_os != "aix") {
       ldflags += [ "-Wl,--fatal-warnings" ]
     }
-    if (fatal_linker_warnings && is_apple &&
-        # TODO(https://crbug.com/1107955): Enable in arm64 component builds.
-        !(is_mac && target_cpu == "arm64" && is_component_build)) {
+    if (fatal_linker_warnings && is_apple) {
       ldflags += [ "-Wl,-fatal_warnings" ]
     }
   } else {
@@ -490,25 +488,6 @@ config("compiler") {
       "-mllvm",
       "-instcombine-lower-dbg-declare=0",
     ]
-
-    # Pinned clang has enable-dse-memoryssa enabled by default but it's broken,
-    # so we have to force it off.
-    # Trunk clang has it disabled by default but it might work, so we force it
-    # on so the ToT bots can check if it works now.
-    if (!llvm_force_head_revision) {
-      cflags += [
-        # TODO(https://crbug.com/1127713): Investigate, remove.
-        "-mllvm",
-        "-enable-dse-memoryssa=false",
-      ]
-    }
-    if (llvm_force_head_revision) {
-      cflags += [
-        # TODO(https://crbug.com/1127713): Investigate, remove.
-        "-mllvm",
-        "-enable-dse-memoryssa=true",
-      ]
-    }
   }
 
   # C11/C++11 compiler flags setup.
@@ -779,9 +758,9 @@ config("compiler_cpu_abi") {
       ldflags += [ "-m32" ]
       if (!is_nacl) {
         cflags += [
-          "-march=pentium4",
+          "-msse2",
           "-mfpmath=sse",
-          "-mstackrealign",
+          "-mmmx",
         ]
       }
     } else if (current_cpu == "arm") {
@@ -1089,6 +1068,17 @@ config("compiler_codegen") {
 
   if (is_nacl) {
     configs += [ "//build/config/nacl:compiler_codegen" ]
+  }
+
+  if (current_cpu == "arm64" && is_android) {
+    # On arm64 disable outlining for Android. See crbug.com/931297 for more
+    # information.
+    cflags += [ "-mno-outline" ]
+
+    # This can be removed once https://bugs.llvm.org/show_bug.cgi?id=40348
+    # has been resolved, and -mno-outline is obeyed by the linker during
+    # ThinLTO.
+    ldflags += [ "-Wl,-mllvm,-enable-machine-outliner=never" ]
   }
 
   asmflags = cflags
@@ -1507,6 +1497,8 @@ config("default_warnings") {
       "-Wno-unneeded-internal-declaration",
     ]
 
+    # use_xcode_clang only refers to the iOS toolchain, host binaries use
+    # chromium's clang always.
     if (!is_nacl) {
       cflags += [
         # TODO(thakis): https://crbug.com/604888
@@ -1519,7 +1511,7 @@ config("default_warnings") {
         cflags += [ "-Wno-nonportable-include-path" ]
       }
 
-      if (!use_xcode_clang) {
+      if (current_toolchain == host_toolchain || !use_xcode_clang) {
         # Flags NaCl (Clang 3.7) and Xcode 9.2 (Clang clang-900.0.39.2) do not
         # recognize.
         cflags += [

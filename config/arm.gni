@@ -120,12 +120,6 @@ if (current_cpu == "arm" || v8_current_cpu == "arm") {
     }
   }
 } else if (current_cpu == "arm64" || v8_current_cpu == "arm64") {
-  declare_args() {
-    # Version of the ARM64 processor when compiling on ARM64. Ignored on
-    # non-ARM64 platforms.
-    arm_version = 80
-  }
-
   # arm64 supports only "hard".
   arm_float_abi = "hard"
   arm_use_neon = true
