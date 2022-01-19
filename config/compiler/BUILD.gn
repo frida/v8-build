@@ -431,7 +431,7 @@ config("compiler") {
 
   # Linux/Android/Fuchsia common flags setup.
   # ---------------------------------
-  if (is_linux || is_chromeos || is_android || is_fuchsia) {
+  if (is_linux || is_chromeos || is_android || is_fuchsia || current_os == "freebsd") {
     asmflags += [ "-fPIC" ]
     cflags += [ "-fPIC" ]
     ldflags += [ "-fPIC" ]
@@ -893,7 +893,8 @@ config("compiler_cpu_abi") {
       }
     } else if (current_cpu == "arm") {
       if (is_clang && !is_android && !is_nacl &&
-          !(is_chromeos_lacros && is_chromeos_device)) {
+          !(is_chromeos_lacros && is_chromeos_device) &&
+          current_os != "freebsd") {
         cflags += [ "--target=arm-linux-gnueabihf" ]
         ldflags += [ "--target=arm-linux-gnueabihf" ]
       }
@@ -908,7 +909,8 @@ config("compiler_cpu_abi") {
       }
     } else if (current_cpu == "arm64") {
       if (is_clang && !is_android && !is_nacl && !is_fuchsia &&
-          !(is_chromeos_lacros && is_chromeos_device)) {
+          !(is_chromeos_lacros && is_chromeos_device) &&
+          current_os != "freebsd") {
         cflags += [ "--target=aarch64-linux-gnu" ]
         ldflags += [ "--target=aarch64-linux-gnu" ]
       }

@@ -221,6 +221,8 @@ if (host_toolchain == "") {
     }
   } else if (host_os == "aix") {
     host_toolchain = "//build/toolchain/aix:$host_cpu"
+  } else if (host_os == "freebsd") {
+    host_toolchain = "//build/toolchain/freebsd:$host_cpu"
   } else if (host_os == "zos") {
     host_toolchain = "//build/toolchain/zos:$host_cpu"
   } else {
@@ -265,6 +267,8 @@ if (target_os == "android") {
   _default_toolchain = "//build/toolchain/win:uwp_$target_cpu"
 } else if (target_os == "aix") {
   _default_toolchain = "//build/toolchain/aix:$target_cpu"
+} else if (target_os == "freebsd") {
+  _default_toolchain = "//build/toolchain/freebsd:$target_cpu"
 } else if (target_os == "zos") {
   _default_toolchain = "//build/toolchain/zos:$target_cpu"
 } else {
