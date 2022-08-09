@@ -19,20 +19,40 @@ import sys
 
 from gn_helpers import ToGNString
 
+# VS 2019 16.61 with 10.0.20348.0 SDK, 10.0.19041 version of Debuggers
+# with ARM64 libraries and UWP support.
+# See go/chromium-msvc-toolchain for instructions about how to update the
+# toolchain.
+#
+# When updating the toolchain, consider the following areas impacted by the
+# toolchain version:
+#
+# * //base/win/windows_version.cc NTDDI preprocessor check
+#   Triggers a compiler error if the available SDK is older than the minimum.
+# * //build/config/win/BUILD.gn NTDDI_VERSION value
+#   Affects the availability of APIs in the toolchain headers.
+# * //docs/windows_build_instructions.md mentions of VS or Windows SDK.
+#   Keeps the document consistent with the toolchain version.
+TOOLCHAIN_HASH = '1023ce2e82'
 
 script_dir = os.path.dirname(os.path.realpath(__file__))
 json_data_file = os.path.join(script_dir, 'win_toolchain.json')
 
 # VS versions are listed in descending order of priority (highest first).
+# The first version is assumed by this script to be the one that is packaged,
+# which makes a difference for the arm64 runtime.
 MSVS_VERSIONS = collections.OrderedDict([
-  ('2019', '16.0'),
-  ('2017', '15.0'),
+    ('2019', '16.0'),  # Default and packaged version of Visual Studio.
+    ('2022', '17.0'),
+    ('2017', '15.0'),
 ])
 
 # List of preferred VC toolset version based on MSVS
+# Order is not relevant for this dictionary.
 MSVC_TOOLSET_VERSION = {
-   '2019' : 'VC142',
-   '2017' : 'VC141',
+    '2022': 'VC143',
+    '2019': 'VC142',
+    '2017': 'VC141',
 }
 
 def _HostIsWindows():
@@ -68,8 +88,6 @@ def SetEnvironmentAndGetRuntimeDllDirs():
     toolchain = toolchain_data['path']
     version = toolchain_data['version']
     win_sdk = toolchain_data.get('win_sdk')
-    if not win_sdk:
-      win_sdk = toolchain_data['win8sdk']
     wdk = toolchain_data['wdk']
     # TODO(scottmg): The order unfortunately matters in these. They should be
     # split into separate keys for x64/x86/arm64. (See CopyDlls call below).
@@ -154,13 +172,17 @@ def GetVisualStudioVersion():
     # Checking vs%s_install environment variables.
     # For example, vs2019_install could have the value
     # "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community".
-    # Only vs2017_install and vs2019_install are supported.
+    # Only vs2017_install, vs2019_install and vs2022_install are supported.
     path = os.environ.get('vs%s_install' % version)
     if path and os.path.exists(path):
       available_versions.append(version)
       break
     # Detecting VS under possible paths.
-    path = os.path.expandvars('%ProgramFiles(x86)%' +
+    if version >= '2022':
+      program_files_path_variable = '%ProgramFiles%'
+    else:
+      program_files_path_variable = '%ProgramFiles(x86)%'
+    path = os.path.expandvars(program_files_path_variable +
                               '/Microsoft Visual Studio/%s' % version)
     if path and any(
         os.path.exists(os.path.join(path, edition))
@@ -187,23 +209,26 @@ def DetectVisualStudioPath():
   # the registry. For details see:
   # https://blogs.msdn.microsoft.com/heaths/2016/09/15/changes-to-visual-studio-15-setup/
   # For now we use a hardcoded default with an environment variable override.
-  for path in (
-      os.environ.get('vs%s_install' % version_as_year),
-      os.path.expandvars('%ProgramFiles(x86)%' +
-                         '/Microsoft Visual Studio/%s/Enterprise' %
-                         version_as_year),
-      os.path.expandvars('%ProgramFiles(x86)%' +
-                         '/Microsoft Visual Studio/%s/Professional' %
-                         version_as_year),
-      os.path.expandvars('%ProgramFiles(x86)%' +
-                         '/Microsoft Visual Studio/%s/Community' %
-                         version_as_year),
-      os.path.expandvars('%ProgramFiles(x86)%' +
-                         '/Microsoft Visual Studio/%s/Preview' %
-                         version_as_year),
-      os.path.expandvars('%ProgramFiles(x86)%' +
-                         '/Microsoft Visual Studio/%s/BuildTools' %
-                         version_as_year)):
+  if version_as_year >= '2022':
+    program_files_path_variable = '%ProgramFiles%'
+  else:
+    program_files_path_variable = '%ProgramFiles(x86)%'
+  for path in (os.environ.get('vs%s_install' % version_as_year),
+               os.path.expandvars(program_files_path_variable +
+                                  '/Microsoft Visual Studio/%s/Enterprise' %
+                                  version_as_year),
+               os.path.expandvars(program_files_path_variable +
+                                  '/Microsoft Visual Studio/%s/Professional' %
+                                  version_as_year),
+               os.path.expandvars(program_files_path_variable +
+                                  '/Microsoft Visual Studio/%s/Community' %
+                                  version_as_year),
+               os.path.expandvars(program_files_path_variable +
+                                  '/Microsoft Visual Studio/%s/Preview' %
+                                  version_as_year),
+               os.path.expandvars(program_files_path_variable +
+                                  '/Microsoft Visual Studio/%s/BuildTools' %
+                                  version_as_year)):
     if path and os.path.exists(path):
       return path
 
@@ -332,14 +357,13 @@ def FindVCComponentRoot(component):
   assert ('GYP_MSVS_OVERRIDE_PATH' in os.environ)
   vc_component_msvc_root = os.path.join(os.environ['GYP_MSVS_OVERRIDE_PATH'],
       'VC', component, 'MSVC')
-  vc_component_msvc_contents = os.listdir(vc_component_msvc_root)
+  vc_component_msvc_contents = glob.glob(
+      os.path.join(vc_component_msvc_root, '14.*'))
   # Select the most recent toolchain if there are several.
   _SortByHighestVersionNumberFirst(vc_component_msvc_contents)
   for directory in vc_component_msvc_contents:
-    if not os.path.isdir(os.path.join(vc_component_msvc_root, directory)):
-      continue
-    if re.match(r'14\.\d+\.\d+', directory):
-      return os.path.join(vc_component_msvc_root, directory)
+    if os.path.isdir(directory):
+      return directory
   raise Exception('Unable to find the VC %s directory.' % component)
 
 
@@ -418,8 +442,8 @@ def _CopyDebugger(target_dir, target_cpu):
       if is_optional:
         continue
       else:
-        raise Exception('%s not found in "%s"\r\nYou must install'
-                        'Windows 10 SDK version 10.0.19041.0 including the '
+        raise Exception('%s not found in "%s"\r\nYou must install '
+                        'Windows 10 SDK version 10.0.20348.0 including the '
                         '"Debugging Tools for Windows" feature.' %
                         (debug_file, full_path))
     target_path = os.path.join(target_dir, debug_file)
@@ -428,27 +452,11 @@ def _CopyDebugger(target_dir, target_cpu):
 
 def _GetDesiredVsToolchainHashes():
   """Load a list of SHA1s corresponding to the toolchains that we want installed
-  to build with.
-
-  When updating the toolchain, consider the following areas impacted by the
-  toolchain version:
-
-  * //base/win/windows_version.cc NTDDI preprocessor check
-    Triggers a compiler error if the available SDK is older than the minimum.
-  * //build/config/win/BUILD.gn NTDDI_VERSION value
-    Affects the availability of APIs in the toolchain headers.
-  * //docs/windows_build_instructions.md mentions of VS or Windows SDK.
-    Keeps the document consistent with the toolchain version.
-  """
-  # VS 2019 16.61 with 10.0.19041 SDK, and 10.0.17134 version of
-  # d3dcompiler_47.dll, with ARM64 libraries and UWP support.
-  # See go/chromium-msvc-toolchain for instructions about how to update the
-  # toolchain.
-  toolchain_hash = 'a687d8e2e4114d9015eb550e1b156af21381faac'
+  to build with."""
   # Third parties that do not have access to the canonical toolchain can map
   # canonical toolchain version to their own toolchain versions.
-  toolchain_hash_mapping_key = 'GYP_MSVS_HASH_%s' % toolchain_hash
-  return [os.environ.get(toolchain_hash_mapping_key, toolchain_hash)]
+  toolchain_hash_mapping_key = 'GYP_MSVS_HASH_%s' % TOOLCHAIN_HASH
+  return [os.environ.get(toolchain_hash_mapping_key, TOOLCHAIN_HASH)]
 
 
 def ShouldUpdateToolchain():

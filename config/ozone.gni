@@ -3,8 +3,14 @@
 # found in the LICENSE file.
 
 import("//build/config/chromecast_build.gni")
-import("//build/config/ui.gni")
+import("//build/config/chromeos/ui_mode.gni")
 import("//build/toolchain/toolchain.gni")
+
+declare_args() {
+  # Indicates if Ozone is enabled. Ozone is a low-level library layer for Linux
+  # that does not require X11.
+  use_ozone = is_chromeos || is_fuchsia || is_linux
+}
 
 declare_args() {
   # Ozone extra platforms file path. Can be overridden to build out of
@@ -17,6 +23,15 @@ declare_args() {
   # TODO(petermcneeley): Backwards compatiblity support for VM images.
   # Remove when deprecated. (https://crbug.com/1122009)
   ozone_platform_gbm = -1
+
+  # Enable explicit apitrace (https://apitrace.github.io) loading.
+  # This requires apitrace library with additional bindings.
+  # See ChromeOS package for details:
+  # https://chromium-review.googlesource.com/c/chromiumos/overlays/chromiumos-overlay/+/2659419
+  # Chrome will not start without an apitrace.so library.
+  # Trace will be saved to /tmp/gltrace.dat file by default. You can
+  # override it at run time with TRACE_FILE=<path> environment variable.
+  enable_opengl_apitrace = false
 }
 
 declare_args() {
@@ -36,14 +51,14 @@ declare_args() {
   # Compile the 'scenic' platform.
   ozone_platform_scenic = false
 
+  # Compile the 'flatland' platform.
+  ozone_platform_flatland = false
+
   # Compile the 'x11' platform.
   ozone_platform_x11 = false
 
   # Compile the 'wayland' platform.
   ozone_platform_wayland = false
-
-  # Compile the 'windows' platform.
-  ozone_platform_windows = false
 
   if (ozone_auto_platforms) {
     # Use headless as the default platform unless modified below.
@@ -52,33 +67,34 @@ declare_args() {
 
     if (is_cast_audio_only) {
       # Just use headless for audio-only Cast platforms.
-    } else if (is_chromecast && !is_fuchsia) {
-      # Enable the Cast ozone platform on all A/V Cast builds except Fuchsia.
+    } else if (is_castos) {
+      # Enable the Cast ozone platform on all video CastOS builds.
       ozone_platform_cast = true
 
       # For visual desktop Chromecast builds, override the default "headless"
       # platform with --ozone-platform=x11.
-      # TODO(halliwell): Create a libcast_graphics implementation for desktop
-      # using X11, and disable this platform.
-      if (is_cast_desktop_build && !is_cast_audio_only) {
+      # NOTE: The CQ is one such case.
+      if (target_os == "linux" &&
+          (target_cpu == "x86" || target_cpu == "x64")) {
         ozone_platform_x11 = true
       } else {
         ozone_platform = "cast"
       }
-    } else if (is_chromeos) {
+    } else if (is_chromeos_ash) {
       ozone_platform = "x11"
       ozone_platform_drm = true
       ozone_platform_x11 = true
+    } else if (is_chromeos_lacros) {
+      ozone_platform = "wayland"
+      ozone_platform_wayland = true
     } else if (is_linux) {
       ozone_platform = "x11"
       ozone_platform_wayland = true
       ozone_platform_x11 = true
-    } else if (is_win) {
-      ozone_platform = "windows"
-      ozone_platform_windows = true
     } else if (is_fuchsia) {
       ozone_platform = "scenic"
       ozone_platform_scenic = true
+      ozone_platform_flatland = true
     }
   }
 
@@ -98,9 +114,9 @@ ozone_external_platform_visibility = [ "$_ozone_extra_directory/*" ]
 
 if (is_a_target_toolchain) {
   assert(use_ozone || !(ozone_platform_cast || ozone_platform_drm ||
+                            ozone_platform_flatland ||
                             ozone_platform_headless || ozone_platform_x11 ||
-                            ozone_platform_wayland || ozone_platform_windows ||
-                            ozone_platform_scenic),
+                            ozone_platform_wayland || ozone_platform_scenic),
          "Must set use_ozone to select ozone platforms")
 }
 

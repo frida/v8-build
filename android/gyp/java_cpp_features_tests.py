@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # Copyright 2020 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -96,14 +96,14 @@ const base::Feature kSomeFeature{"SomeFeature",
 const base::Feature kFoo = {"Foo", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Build config-specific base::Feature
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 const base::Feature kAndroidOnlyFeature{"AndroidOnlyFeature",
                                         base::FEATURE_DISABLED_BY_DEFAULT};
 #endif
 
 // Value depends on build config
 const base::Feature kMaybeEnabled{"MaybeEnabled",
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     base::FEATURE_DISABLED_BY_DEFAULT
 #else
     base::FEATURE_ENABLED_BY_DEFAULT
@@ -131,7 +131,7 @@ const base::Feature kMaybeEnabled{"MaybeEnabled",
     test_data = """
 // Not currently supported: name depends on C++ directive
 const base::Feature kNameDependsOnOs{
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     "MaybeName1",
 #else
     "MaybeName2",

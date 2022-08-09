@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+
 import datetime
 import functools
 import logging
@@ -20,6 +21,7 @@ from devil.android.sdk import adb_wrapper
 from devil.utils import file_utils
 from devil.utils import parallelizer
 from pylib import constants
+from pylib.constants import host_paths
 from pylib.base import environment
 from pylib.utils import instrumentation_tracing
 from py_trace_event import trace_event
@@ -82,7 +84,7 @@ def handle_shard_failures_with(on_failure):
   return decorator
 
 
-def place_nomedia_on_device(dev, device_root):
+def place_nomedia_on_device(dev, device_root, run_as=None, as_root=False):
   """Places .nomedia file in test data root.
 
   This helps to prevent system from scanning media files inside test data.
@@ -92,10 +94,19 @@ def place_nomedia_on_device(dev, device_root):
     device_root: Base path on device to place .nomedia file.
   """
 
-  dev.RunShellCommand(['mkdir', '-p', device_root], check_return=True)
-  dev.WriteFile('%s/.nomedia' % device_root, 'https://crbug.com/796640')
+  dev.RunShellCommand(['mkdir', '-p', device_root],
+                      run_as=run_as,
+                      as_root=as_root,
+                      check_return=True)
+  dev.WriteFile('%s/.nomedia' % device_root,
+                'https://crbug.com/796640',
+                run_as=run_as,
+                as_root=as_root)
 
 
+# TODO(1262303): After Telemetry is supported by python3 we can re-add
+# super without arguments in this script.
+# pylint: disable=super-with-arguments
 class LocalDeviceEnvironment(environment.Environment):
 
   def __init__(self, args, output_manager, _error_func):
@@ -127,10 +138,12 @@ class LocalDeviceEnvironment(environment.Environment):
         output_directory=constants.GetOutDirectory(),
         adb_path=args.adb_path)
 
-    # Some things such as Forwarder require ADB to be in the environment path.
+    # Some things such as Forwarder require ADB to be in the environment path,
+    # while others like Devil's bundletool.py require Java on the path.
     adb_dir = os.path.dirname(adb_wrapper.AdbWrapper.GetAdbPath())
     if adb_dir and adb_dir not in os.environ['PATH'].split(os.pathsep):
-      os.environ['PATH'] = adb_dir + os.pathsep + os.environ['PATH']
+      os.environ['PATH'] = os.pathsep.join(
+          [adb_dir, host_paths.JAVA_PATH, os.environ['PATH']])
 
   #override
   def SetUp(self):

@@ -3,28 +3,10 @@
 # found in the LICENSE file.
 
 import("//build/config/ios/ios_sdk.gni")
+import("//build/toolchain/goma.gni")
+import("//build/toolchain/rbe.gni")
 import("//build/toolchain/toolchain.gni")
-
-if (current_cpu == "arm" || current_cpu == "arm64") {
-  import("//build/config/arm.gni")
-}
-
-declare_args() {
-  # Enabling this option makes clang compile to an intermediate
-  # representation ("bitcode"), and not to native code. This is preferred
-  # when including WebRTC in the apps that will be sent to Apple's App Store
-  # and mandatory for the apps that run on watchOS or tvOS.
-  # The option only works when building with Xcode (use_xcode_clang = true).
-  # Mimicking how Xcode handles it, the production builds (is_debug = false)
-  # get real bitcode sections added, while the debug builds (is_debug = true)
-  # only get bitcode-section "markers" added in them.
-  # NOTE: This option is ignored when building versions for the iOS simulator,
-  # where a part of libvpx is compiled from the assembly code written using
-  # Intel assembly syntax; Yasm / Nasm do not support emitting bitcode parts.
-  # That is not a limitation for now as Xcode mandates the presence of bitcode
-  # only when building bitcode-enabled projects for real devices (ARM CPUs).
-  enable_ios_bitcode = false
-}
+import("//build_overrides/build.gni")
 
 # This is included by reference in the //build/config/compiler config that
 # is applied to all targets. It is here to separate out the logic.
@@ -40,11 +22,7 @@ config("compiler") {
   } else if (current_cpu == "arm" || current_cpu == "armv7") {
     triplet_cpu = "armv7"
   } else if (current_cpu == "arm64") {
-    if (arm_version >= 83) {
-      triplet_cpu = "arm64e"
-    } else {
-      triplet_cpu = "arm64"
-    }
+    triplet_cpu = "arm64"
   } else {
     assert(false, "unsupported cpu: $current_cpu")
   }
@@ -87,6 +65,11 @@ config("compiler") {
   # an Objective C struct won't be called, which is very bad.
   cflags_objcc = [ "-fobjc-call-cxx-cdtors" ]
 
+  # TODO(crbug.com/1331345) Disable sprintf errors in Xcode 14 beta 1.
+  if (xcode_version_int >= 1400) {
+    cflags += [ "-Wno-deprecated-declarations" ]
+  }
+
   ldflags = common_flags
 }
 
@@ -95,12 +78,12 @@ config("compiler") {
 # that is iOS-only. Please see that target for advice on what should go in
 # :runtime_library vs. :compiler.
 config("runtime_library") {
-  # The variable ios_sdk_path may be relative to root_out_dir on the bots. As
-  # it is passed to the compiler via cflags, ldflags which do not rebase the
-  # values (since they are compiler flags, not paths), it may be required to
-  # rebase it. Use a local variable to avoid repeating the rebase invocation.
+  # The variable ios_sdk_path is relative to root_build_dir when using Goma RBE
+  # and system Xcode (since Goma RBE only supports paths relative to source).
+  # Rebase the value in that case since gn does not convert paths in compiler
+  # flags (since it is not aware they are paths).
   _sdk_root = ios_sdk_path
-  if (ios_enable_relative_sdk_path) {
+  if (use_system_xcode && (use_goma || use_remoteexec)) {
     _sdk_root = rebase_path(ios_sdk_path, root_build_dir)
   }
 
@@ -120,14 +103,13 @@ config("runtime_library") {
       "-iframework",
       "$_sdk_root/System/iOSSupport/System/Library/Frameworks",
     ]
-  }
 
-  if (use_xcode_clang && enable_ios_bitcode && target_environment == "device") {
-    if (is_debug) {
-      common_flags += [ "-fembed-bitcode-marker" ]
-    } else {
-      common_flags += [ "-fembed-bitcode" ]
-    }
+    swiftflags += [
+      "-isystem",
+      "$_sdk_root/System/iOSSupport/usr/include",
+      "-Fsystem",
+      "$_sdk_root/System/iOSSupport/System/Library/Frameworks",
+    ]
   }
 
   asmflags = common_flags
@@ -159,19 +141,16 @@ config("ios_extension_executable_flags") {
   # On "catalyst", the bundle structure is different (uses the same structure
   # as a regular macOS app), so an additional -rpath is required.
   if (target_environment == "catalyst") {
-    ldflags += [ "-Wl,-rpath,@loader_path/../Frameworks" ]
+    ldflags += [ "-Wl,-rpath,@loader_path/../../../../Frameworks" ]
   }
 
-  ldflags += [ "-Wl,-rpath,@executable_path/Frameworks" ]
+  ldflags += [ "-Wl,-rpath,@executable_path/../../Frameworks" ]
 }
 
 config("ios_dynamic_flags") {
   ldflags = [
     # Always load Objective-C categories and class.
     "-Wl,-ObjC",
-
-    # Uses version 2 of Objective-C ABI.
-    "-Wl,-objc_abi_version,2",
   ]
 
   # The path to the Swift compatibility libraries (required to run code built
@@ -185,14 +164,28 @@ config("ios_dynamic_flags") {
     _swift_compatibility_libs_dir =
         "$_swift_compatibility_libs_dir_prefix/iphoneos"
   } else if (target_environment == "catalyst") {
-    _swift_compatibility_libs_dir =
-        "$_swift_compatibility_libs_dir_prefix/maccatalyst"
+    # The Swift compatibility libraries have changed location starting with
+    # Xcode 13.0, so check the version of Xcode when deciding which path to
+    # use.
+    if (xcode_version_int >= 1300) {
+      _swift_compatibility_libs_dir =
+          "$_swift_compatibility_libs_dir_prefix/macosx"
+    } else {
+      _swift_compatibility_libs_dir =
+          "$_swift_compatibility_libs_dir_prefix/maccatalyst"
+    }
   }
 
   lib_dirs = [
     "$ios_sdk_path/usr/lib/swift",
     _swift_compatibility_libs_dir,
   ]
+
+  # When building for catalyst, some Swift support libraries are in a
+  # different directory which needs to be added to the search path.
+  if (target_environment == "catalyst") {
+    lib_dirs += [ "$ios_sdk_path/System/iOSSupport/usr/lib/swift" ]
+  }
 }
 
 config("ios_shared_library_flags") {
@@ -202,13 +195,36 @@ config("ios_shared_library_flags") {
   ]
 }
 
-config("xctest_config") {
-  framework_dirs = [ "$ios_sdk_platform_path/Developer/Library/Frameworks" ]
+config("disable_implicit_retain_self_warning") {
+  cflags_objc = [ "-Wno-implicit-retain-self" ]
+  cflags_objcc = cflags_objc
+}
 
+config("xctest_config") {
+  # Add some directories to the system framework search path to make
+  # them available to the compiler while silencing warnings in the
+  # framework headers. This is required for XCTest.
+  common_flags = [
+    "-iframework",
+    rebase_path("$ios_sdk_platform_path/Developer/Library/Frameworks",
+                root_build_dir),
+    "-iframework",
+    rebase_path("$ios_sdk_path/Developer/Library/Frameworks", root_build_dir),
+  ]
+  cflags = common_flags
+  ldflags = common_flags
+  swiftflags = common_flags
+
+  include_dirs = [ "$ios_sdk_platform_path/Developer/usr/lib" ]
+  lib_dirs = [ "$ios_sdk_platform_path/Developer/usr/lib" ]
   frameworks = [
     "Foundation.framework",
     "XCTest.framework",
   ]
+}
+
+config("enable_swift_cxx_interop") {
+  swiftflags = [ "-enable-cxx-interop" ]
 }
 
 group("xctest") {
@@ -223,14 +239,14 @@ _xctrunner_path =
 # are below $root_build_dir, it is not possible to list them as a target input
 # without gn complaining (as it can't find a target creating those files).
 #
-# The symlinks are created by //build/config/mac/sdk_info.py script invoked
+# The symlinks are created by //build/config/apple/sdk_info.py script invoked
 # via exec_script() from //build/config/{ios/ios_sdk.gni,mac/mac_sdk.gni}.
 # As the invocation is done by exec_script, there is no target that can list
 # those files as output.
 #
 # To workaround this, add a target that pretends to create those files
 # (but does nothing). See https://crbug.com/1061487 for why this is needed.
-if (ios_use_goma_rbe) {
+if (use_system_xcode && (use_goma || use_remoteexec)) {
   action("copy_xctrunner_app") {
     testonly = true
     script = "//build/noop.py"
@@ -259,7 +275,7 @@ action("xctest_runner_without_arm64e") {
     xcode_version,
   ]
 
-  if (ios_use_goma_rbe) {
+  if (use_system_xcode && (use_goma || use_remoteexec)) {
     deps = [ ":copy_xctrunner_app" ]
   }
 }

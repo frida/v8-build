@@ -128,13 +128,19 @@ declare_args() {
   # release (!is_debug). This might be better expressed as a tri-state
   # (debug, release, official) but for historical reasons there are two
   # separate flags.
+  #
+  # IMPORTANT NOTE: (!is_debug) is *not* sufficient to get satisfying
+  # performance. In particular, DCHECK()s are still enabled for release builds,
+  # which can halve overall performance, and do increase memory usage. Always
+  # set "is_official_build" to true for any build intended to ship to end-users.
   is_official_build = false
 
   # Set to true when compiling with the Clang compiler.
   is_clang = current_os != "linux" ||
              (current_cpu != "s390x" && current_cpu != "s390" &&
               current_cpu != "ppc64" && current_cpu != "ppc" &&
-              current_cpu != "mips" && current_cpu != "mips64")
+              current_cpu != "mips" && current_cpu != "mips64" &&
+              current_cpu != "riscv64")
 
   # Allows the path to a custom target toolchain to be injected as a single
   # argument, and set as the default toolchain.
@@ -143,9 +149,6 @@ declare_args() {
   # This should not normally be set as a build argument.  It's here so that
   # every toolchain can pass through the "global" value via toolchain_args().
   host_toolchain = ""
-
-  # Selects which C-runtime to use; one of: default, dynamic, static.
-  use_crt = "default"
 
   # DON'T ADD MORE FLAGS HERE. Read the comment above.
 }
@@ -161,11 +164,13 @@ declare_args() {
   # When false, components will be linked statically.
   #
   # For more information see
-  # https://chromium.googlesource.com/chromium/src/+/master/docs/component_build.md
+  # https://chromium.googlesource.com/chromium/src/+/main/docs/component_build.md
   is_component_build = is_debug && current_os != "ios"
 }
 
 assert(!(is_debug && is_official_build), "Can't do official debug builds")
+assert(!(current_os == "ios" && is_component_build),
+       "Can't use component build on iOS")
 
 # ==============================================================================
 # TOOLCHAIN SETUP
@@ -213,8 +218,8 @@ if (host_toolchain == "") {
     }
   } else if (host_os == "aix") {
     host_toolchain = "//build/toolchain/aix:$host_cpu"
-  } else if (host_os == "freebsd") {
-    host_toolchain = "//build/toolchain/freebsd:$host_cpu"
+  } else if (host_os == "zos") {
+    host_toolchain = "//build/toolchain/zos:$host_cpu"
   } else {
     assert(false, "Unsupported host_os: $host_os")
   }
@@ -236,9 +241,10 @@ if (target_os == "android") {
 } else if (target_os == "fuchsia") {
   _default_toolchain = "//build/toolchain/fuchsia:$target_cpu"
 } else if (target_os == "ios") {
-  _default_toolchain = "//build/toolchain/mac:ios_clang_$target_cpu"
+  _default_toolchain = "//build/toolchain/ios:ios_clang_$target_cpu"
 } else if (target_os == "mac") {
-  assert(host_os == "mac", "Mac cross-compiles are unsupported.")
+  assert(host_os == "mac" || host_os == "linux",
+         "Mac cross-compiles are unsupported.")
   _default_toolchain = "//build/toolchain/mac:clang_$target_cpu"
 } else if (target_os == "win") {
   # On Windows, we use the same toolchain for host and target by default.
@@ -256,8 +262,8 @@ if (target_os == "android") {
   _default_toolchain = "//build/toolchain/win:uwp_$target_cpu"
 } else if (target_os == "aix") {
   _default_toolchain = "//build/toolchain/aix:$target_cpu"
-} else if (target_os == "freebsd") {
-  _default_toolchain = "//build/toolchain/freebsd:$target_cpu"
+} else if (target_os == "zos") {
+  _default_toolchain = "//build/toolchain/zos:$target_cpu"
 } else {
   assert(false, "Unsupported target_os: $target_os")
 }
@@ -281,8 +287,8 @@ if (custom_toolchain != "") {
 # - is_mac is set only for desktop Mac. It is not set on iOS.
 # - is_posix is true for mac and any Unix-like system (basically everything
 #   except Fuchsia and Windows).
-# - is_linux is true for desktop Linux and ChromeOS, but not Android (which is
-#   generally too different despite being based on the Linux kernel).
+# - is_linux is true for desktop Linux, but not for ChromeOS nor Android (which
+#   is generally too different despite being based on the Linux kernel).
 #
 # Do not add more is_* variants here for random lesser-used Unix systems like
 # aix or one of the BSDs. If you need to check these, just check the
@@ -323,35 +329,31 @@ default_compiler_configs = [
   "//build/config/compiler:afdo",
   "//build/config/compiler:afdo_optimize_size",
   "//build/config/compiler:cet_shadow_stack",
+  "//build/config/compiler:chromium_code",
   "//build/config/compiler:compiler",
   "//build/config/compiler:compiler_arm_fpu",
   "//build/config/compiler:compiler_arm_thumb",
-  "//build/config/compiler:chromium_code",
   "//build/config/compiler:default_include_dirs",
+  "//build/config/compiler:default_init_stack_vars",
   "//build/config/compiler:default_optimization",
   "//build/config/compiler:default_stack_frames",
   "//build/config/compiler:default_symbols",
   "//build/config/compiler:export_dynamic",
   "//build/config/compiler:no_exceptions",
   "//build/config/compiler:no_rtti",
+  "//build/config/compiler:no_unresolved_symbols",
   "//build/config/compiler:runtime_library",
   "//build/config/compiler:thin_archive",
-  "//build/config/compiler:default_init_stack_vars",
+  "//build/config/compiler:thinlto_optimize_default",
   "//build/config/compiler/pgo:default_pgo_flags",
   "//build/config/coverage:default_coverage",
   "//build/config/sanitizers:default_sanitizer_flags",
 ]
 
 if (is_win) {
-  if (use_crt == "default") {
-    default_compiler_configs += [ "//build/config/win:default_crt" ]
-  } else if (use_crt == "dynamic") {
-    default_compiler_configs += [ "//build/config/win:dynamic_crt" ]
-  } else if (use_crt == "static") {
-    default_compiler_configs += [ "//build/config/win:static_crt" ]
-  }
-
   default_compiler_configs += [
+    "//build/config/win:default_cfg_compiler",
+    "//build/config/win:default_crt",
     "//build/config/win:lean_and_mean",
     "//build/config/win:nominmax",
     "//build/config/win:unicode",
@@ -375,11 +377,6 @@ if (is_android) {
       [ "//build/config/android:default_orderfile_instrumentation" ]
 }
 
-if (is_win) {
-  default_compiler_configs +=
-      [ "//build/config/win:default_cygprofile_instrumentation" ]
-}
-
 if (is_clang && !is_nacl) {
   default_compiler_configs += [
     "//build/config/clang:find_bad_constructs",
@@ -399,6 +396,12 @@ set_defaults("static_library") {
   configs = default_compiler_configs
 }
 set_defaults("source_set") {
+  configs = default_compiler_configs
+}
+set_defaults("rust_library") {
+  configs = default_compiler_configs
+}
+set_defaults("rust_proc_macro") {
   configs = default_compiler_configs
 }
 
@@ -465,6 +468,18 @@ set_defaults("loadable_module") {
   }
 }
 
+# A helper for forwarding testonly and visibility.
+# Forwarding "*" does not include variables from outer scopes (to avoid copying
+# all globals into each template invocation), so it will not pick up
+# file-scoped or outer-template-scoped variables. Normally this behavior is
+# desired, but "visibility" and "testonly" are commonly defined in outer scopes.
+# Explicitly forwarding them in forward_variables_from() works around this
+# nuance. See //build/docs/writing_gn_templates.md#using-forward_variables_from
+TESTONLY_AND_VISIBILITY = [
+  "testonly",
+  "visibility",
+]
+
 # Sets default dependencies for executable and shared_library targets.
 #
 # Variables
@@ -479,9 +494,13 @@ foreach(_target_type,
           "shared_library",
         ]) {
   template(_target_type) {
+    # Alias "target_name" because it is clobbered by forward_variables_from().
     _target_name = target_name
     target(_target_type, _target_name) {
-      forward_variables_from(invoker, "*", [ "no_default_deps" ])
+      forward_variables_from(invoker,
+                             "*",
+                             TESTONLY_AND_VISIBILITY + [ "no_default_deps" ])
+      forward_variables_from(invoker, TESTONLY_AND_VISIBILITY)
       if (!defined(deps)) {
         deps = []
       }
@@ -561,26 +580,24 @@ template("component") {
     _component_mode = "static_library"
   }
   target(_component_mode, target_name) {
-    # Explicitly forward visibility, implicitly forward everything else.
-    # Forwarding "*" doesn't recurse into nested scopes (to avoid copying all
-    # globals into each template invocation), so won't pick up file-scoped
-    # variables. Normally this isn't too bad, but visibility is commonly
-    # defined at the file scope. Explicitly forwarding visibility and then
-    # excluding it from the "*" set works around this problem.
-    # See http://crbug.com/594610
-    forward_variables_from(invoker, [ "visibility" ])
-    forward_variables_from(invoker, "*", [ "visibility" ])
+    forward_variables_from(invoker, TESTONLY_AND_VISIBILITY)
+    forward_variables_from(invoker, "*", TESTONLY_AND_VISIBILITY)
   }
 }
 
 # Component defaults
-set_defaults("component") {
-  if (is_component_build) {
-    configs = default_shared_library_configs
-    if (is_android) {
-      configs -= [ "//build/config/android:hide_all_but_jni_onload" ]
-    }
-  } else {
-    configs = default_compiler_configs
+# Set a variable since we also want to make this available
+# to mixed_component.gni
+if (is_component_build) {
+  default_component_configs = default_shared_library_configs
+  if (is_android) {
+    default_component_configs -=
+        [ "//build/config/android:hide_all_but_jni_onload" ]
   }
+} else {
+  default_component_configs = default_compiler_configs
+}
+
+set_defaults("component") {
+  configs = default_component_configs
 }

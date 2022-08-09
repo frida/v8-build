@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+
 import contextlib
 import os
 import sys
@@ -23,6 +24,8 @@ ANDROID_PLATFORM_DEVELOPMENT_SCRIPTS_PATH = os.path.join(
 BUILD_PATH = os.path.join(DIR_SOURCE_ROOT, 'build')
 DEVIL_PATH = os.path.join(
     DIR_SOURCE_ROOT, 'third_party', 'catapult', 'devil')
+JAVA_PATH = os.path.join(DIR_SOURCE_ROOT, 'third_party', 'jdk', 'current',
+                         'bin')
 TRACING_PATH = os.path.join(
     DIR_SOURCE_ROOT, 'third_party', 'catapult', 'tracing')
 

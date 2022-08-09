@@ -2,8 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+
 import logging
 
+from six.moves import range  # pylint: disable=redefined-builtin
 from devil.android import device_errors
 from devil.android.sdk import intent
 from pylib import constants
@@ -14,9 +16,6 @@ from pylib.local.device import local_device_test_run
 _CHROME_PACKAGE = constants.PACKAGE_INFO['chrome'].package
 
 class LocalDeviceMonkeyTestRun(local_device_test_run.LocalDeviceTestRun):
-  def __init__(self, env, test_instance):
-    super(LocalDeviceMonkeyTestRun, self).__init__(env, test_instance)
-
   def TestPackage(self):
     return 'monkey'
 

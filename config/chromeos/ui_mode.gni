@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chromeos/args.gni")
+
 declare_args() {
   # Deprecated, use is_lacros.
   #
@@ -16,21 +18,43 @@ declare_args() {
   # is_ash = chromeos_product == "ash"
   chromeos_is_browser_only = false
 
-  # Setting this to true when building LaCrOS-chrome will cause it to
-  # *also* build ash-chrome in a subdirectory using an alternate toolchain.
+  # Setting this to true when building linux Lacros-chrome will cause it to
+  # *also* build linux ash-chrome in a subdirectory using an alternate
+  # toolchain.
   # Don't set this unless you're sure you want it, because it'll double
   # your build time.
   also_build_ash_chrome = false
+
+  # Setting this to true when building linux ash-chrome will cause it to
+  # *also* build linux Lacros-chrome in a subdirectory using an alternate toolchain.
+  also_build_lacros_chrome = false
+
+  # Setting this when building ash-chrome will cause it to
+  # *also* build Lacros-chrome in a subdirectory using an alternate toolchain.
+  # You can set this to either "amd64" or "arm".
+  also_build_lacros_chrome_for_architecture = ""
 }
 
-# is_chromeos_ash|lacros is used to specify that it is specific to either
+# is_chromeos_{ash,lacros} is used to specify that it is specific to either
 # ash or lacros chrome for chromeos. For platform specific logic that
 # applies to both, use is_chromeos instead.
+# .gn files are evaluated multiple times for each toolchain.
+# is_chromeos_{ash,lacros} should be set true only for builds with target
+# toolchains.
 is_chromeos_ash = is_chromeos && !chromeos_is_browser_only
-is_chromeos_lacros = chromeos_is_browser_only
+is_chromeos_lacros = is_chromeos && chromeos_is_browser_only
 
-# TODO(crbug.com/1052397):
-# Remove is_ash|lacros once all are replaced by is_chromeos_*.
-# is_ash|lacros is deprecated. Use is_chromeos_ash|lacros instead.
-is_ash = is_chromeos_ash
-is_lacros = is_chromeos_lacros
+# also_build_ash_chrome and also_build_lacros_chrome cannot be both true.
+assert(!(also_build_ash_chrome && also_build_lacros_chrome))
+
+# Can't set both also_build_lacros_chrome and
+# also_build_lacros_chrome_for_architecture.
+assert(!(also_build_lacros_chrome == true &&
+             also_build_lacros_chrome_for_architecture != ""))
+
+# also_build_lacros_chrome_for_architecture is for device only.
+assert(is_chromeos_device || also_build_lacros_chrome_for_architecture == "")
+
+# also_build_lacros_chrome_for_architecture is for ash build only.
+assert(!chromeos_is_browser_only ||
+       also_build_lacros_chrome_for_architecture == "")

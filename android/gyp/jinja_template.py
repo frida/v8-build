@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Copyright 2014 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
@@ -34,7 +34,7 @@ class _RecordingFileSystemLoader(jinja2.FileSystemLoader):
     return contents, filename, uptodate
 
 
-class JinjaProcessor(object):
+class JinjaProcessor:
   """Allows easy rendering of jinja templates with input file tracking."""
   def __init__(self, loader_base_dir, variables=None):
     self.loader_base_dir = loader_base_dir

@@ -141,9 +141,9 @@ class WinTool(object):
     # Read output one line at a time as it shows up to avoid OOM failures when
     # GBs of output is produced.
     for line in link.stdout:
-      if (not line.startswith('   Creating library ') and
-          not line.startswith('Generating code') and
-          not line.startswith('Finished generating code')):
+      if (not line.startswith(b'   Creating library ')
+          and not line.startswith(b'Generating code')
+          and not line.startswith(b'Finished generating code')):
         print(line)
     return link.wait()
 
@@ -155,7 +155,8 @@ class WinTool(object):
       # separator, convert it to '\\' when running on Windows.
       args = list(args) # *args is a tuple by default, which is read-only
       args[0] = args[0].replace('/', '\\')
-    popen = subprocess.Popen(args, shell=True, env=env,
+    # See comment in ExecLinkWrapper() for why shell=False on non-win.
+    popen = subprocess.Popen(args, shell=sys.platform == 'win32', env=env,
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     out, _ = popen.communicate()
     for line in out.decode('utf8').splitlines():

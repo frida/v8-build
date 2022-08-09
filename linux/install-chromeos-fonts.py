@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -59,7 +59,7 @@ def main(args):
   if os.path.isdir(dest_dir):
     shutil.rmtree(dest_dir)
   os.mkdir(dest_dir)
-  os.chmod(dest_dir, 0755)
+  os.chmod(dest_dir, 0o755)
 
   print("Installing Chrome OS fonts to %s." % dest_dir)
   for url in URLS:
@@ -80,9 +80,9 @@ def main(args):
 
   for base, dirs, files in os.walk(dest_dir):
     for dir in dirs:
-      os.chmod(os.path.join(base, dir), 0755)
+      os.chmod(os.path.join(base, dir), 0o755)
     for file in files:
-      os.chmod(os.path.join(base, file), 0644)
+      os.chmod(os.path.join(base, file), 0o644)
 
   print("""\
 

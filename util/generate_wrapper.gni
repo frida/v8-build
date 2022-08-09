@@ -58,18 +58,22 @@ template("generate_wrapper") {
 
   action(target_name) {
     forward_variables_from(invoker,
-                           [
-                             "data",
-                             "data_deps",
-                             "deps",
-                             "sources",
-                             "testonly",
-                           ])
+                           TESTONLY_AND_VISIBILITY + [
+                                 "assert_no_deps",
+                                 "data",
+                                 "data_deps",
+                                 "deps",
+                                 "public_deps",
+                                 "sources",
+                               ])
     script = _generator_script
     if (!defined(data)) {
       data = []
     }
-    data += [ _wrapper_script ]
+    data += [
+      _wrapper_script,
+      "//.vpython3",
+    ]
     outputs = [ _wrapper_script ]
 
     _rebased_executable_to_wrap =
@@ -89,8 +93,9 @@ template("generate_wrapper") {
       rebase_path(root_build_dir, root_build_dir),
       "--script-language",
       _script_language,
-      "--",
     ]
+
+    args += [ "--" ]
     args += _wrapped_arguments
 
     if (defined(invoker.write_runtime_deps)) {
