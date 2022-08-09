@@ -100,6 +100,12 @@ template("apple_toolchain") {
     assert(!(toolchain_cc_wrapper != "" && toolchain_uses_goma),
            "Goma and cc_wrapper can't be used together.")
 
+    if (defined(toolchain_args.use_xcode_clang)) {
+      toolchain_uses_xcode_clang = toolchain_args.use_xcode_clang
+    } else {
+      toolchain_uses_xcode_clang = use_xcode_clang
+    }
+
     if (defined(toolchain_args.use_lld)) {
       toolchain_uses_lld = toolchain_args.use_lld
     } else {
@@ -121,7 +127,14 @@ template("apple_toolchain") {
       toolchain_is_component_build = is_component_build
     }
 
-    prefix = rebase_path("$clang_base_path/bin/", root_build_dir)
+    # Supports building with the version of clang shipped with Xcode
+    # by not respecting clang_base_path.
+    if (toolchain_uses_xcode_clang) {
+      prefix = invoker.bin_path
+    } else {
+      prefix = rebase_path("$clang_base_path/bin/", root_build_dir)
+    }
+
     _cc = "${prefix}clang"
     _cxx = "${prefix}clang++"
 

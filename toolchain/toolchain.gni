@@ -17,6 +17,10 @@ declare_args() {
   # `gclient runhooks` is run as well.
   llvm_force_head_revision = false
 
+  # Compile with Xcode version of clang instead of hermetic version shipped
+  # with the build.
+  use_xcode_clang = false
+
   # Used for binary size analysis.
   generate_linker_map = is_android && is_official_build
 }

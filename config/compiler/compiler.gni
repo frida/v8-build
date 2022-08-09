@@ -38,7 +38,7 @@ declare_args() {
   # In late bring-up on macOS (see docs/mac_lld.md).
   # Tentatively used on iOS.
   # The default linker everywhere else.
-  use_lld = is_clang && current_os != "zos"
+  use_lld = is_clang && !use_xcode_clang && current_os != "zos"
 }
 
 declare_args() {

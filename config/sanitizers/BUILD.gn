@@ -43,10 +43,10 @@ group("deps") {
     }
   }
   if (is_asan) {
-    if (is_win || is_apple) {
+    if (is_win || (is_apple && !use_xcode_clang)) {
       data_deps = [ ":copy_asan_runtime" ]
     }
-    if (is_apple) {
+    if (is_mac || (is_ios && !use_xcode_clang)) {
       public_deps = [ ":asan_runtime_bundle_data" ]
     }
   }
@@ -55,7 +55,7 @@ group("deps") {
 assert(!(is_win && is_asan && current_cpu == "x86"),
        "ASan is only supported in 64-bit builds on Windows.")
 
-if ((is_apple || is_win) && is_asan) {
+if (((is_apple && !use_xcode_clang) || is_win) && is_asan) {
   if (is_mac || (is_ios && target_environment == "catalyst")) {
     _clang_rt_dso_path = "darwin/libclang_rt.asan_osx_dynamic.dylib"
   } else if (is_ios) {

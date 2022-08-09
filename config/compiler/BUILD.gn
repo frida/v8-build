@@ -1528,7 +1528,7 @@ config("default_warnings") {
         "-Wno-ignored-pragma-optimize",
       ]
 
-      if (!is_nacl) {
+      if (!is_nacl && !(is_apple && use_xcode_clang)) {
         cflags += [
           # TODO(https://crbug.com/1300731) Clean up and enable.
           "-Wno-unqualified-std-cast-call",
